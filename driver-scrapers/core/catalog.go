@@ -145,7 +145,7 @@ func (c *CatalogClient) GetDownloadURL(updateID string) (string, error) {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Referer", c.baseURL+"/")
-	c.applyHeaders(r)
+	c.applyHeaders(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download request failed: %w", err)
