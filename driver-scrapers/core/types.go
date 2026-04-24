@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"strconv"
 	"sync"
 )
 
@@ -316,30 +317,5 @@ func (o *Orchestrator) Cancel() {
 }
 
 func formatResultSummary(r *ProviderResult) string {
-	return "Success: " + itoa(r.Success) + ", Failed: " + itoa(r.Failed) + ", Skipped: " + itoa(r.Skipped)
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	neg := false
-	if i < 0 {
-		neg = true
-		i = -i
-	}
-	var buf [12]byte
-	idx := len(buf)
-	for i >= 10 || i == 0 {
-		idx--
-		buf[idx] = byte(i%10) + '0'
-		i /= 10
-	}
-	idx--
-	buf[idx] = byte(i) + '0'
-	if neg {
-		idx--
-		buf[idx] = '-'
-	}
-	return string(buf[idx:])
+	return "Success: " + strconv.Itoa(r.Success) + ", Failed: " + strconv.Itoa(r.Failed) + ", Skipped: " + strconv.Itoa(r.Skipped)
 }

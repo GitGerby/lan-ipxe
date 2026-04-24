@@ -5,8 +5,6 @@ import (
 )
 
 var (
-	styleGuide = lipgloss.NewStyle().Padding(0, 0, 0, 1)
-
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("252")).
@@ -46,31 +44,6 @@ var (
 			Foreground(lipgloss.Color("237")).
 			Padding(0, 1)
 )
-
-// progressBar renders a fixed-width progress bar with the given percentage.
-func progressBar(fraction float64, width int) string {
-	if fraction < 0 {
-		fraction = 0
-	}
-	if fraction > 1 {
-		fraction = 1
-	}
-
-	filled := int(fraction * float64(width))
-	if filled > width {
-		filled = width
-	}
-
-	var sb string
-	for i := 0; i < width; i++ {
-		if i < filled {
-			sb += "█"
-		} else {
-			sb += "░"
-		}
-	}
-	return sb
-}
 
 // progressBarWithColor renders a progress bar with color based on fraction.
 func progressBarWithColor(fraction float64, width int) string {

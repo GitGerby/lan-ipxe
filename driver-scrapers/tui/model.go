@@ -3,9 +3,10 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/gitgerby/lan-ipxe/driver-scrapers/core"
 )
@@ -14,30 +15,28 @@ import (
 type Model struct {
 	width  int
 	height int
-	events []core.ProgressEvent
+	// Provider insertion order (preserves first-seen order)
+	providerOrder []string
 	// Per-provider state
 	providerStates map[string]*providerState
 	// Overall state
 	totalDevices int
 	doneDevices  int
+	downloading  int
+	extracting   int
 	// Spinner
-	spinner  spinner
-	done     bool
+	spinner  spinner.Model
 	quitting bool
-	// Timers
-	lastTick  time.Time
-	tickCount int
 }
 
 type providerState struct {
-	name     string
-	devices  map[string]*deviceState
-	total    int
-	done     int
-	failed   int
-	status   string
-	progress float64
-	message  string
+	name    string
+	devices map[string]*deviceState
+	total   int
+	done    int
+	failed  int
+	status  string
+	message string
 }
 
 type deviceState struct {
@@ -53,35 +52,28 @@ type deviceState struct {
 
 // NewModel creates a new TUI model.
 func NewModel() *Model {
+	s := spinner.New()
+	s.Spinner = spinner.Line
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("135"))
+
 	return &Model{
 		width:          80,
 		height:         24,
+		providerOrder:  make([]string, 0),
 		providerStates: make(map[string]*providerState),
+		spinner:        s,
 	}
 }
 
 // Init returns the initial TUI message.
+// Bubble Tea automatically sends a tea.WindowSizeMsg after starting,
+// which will update m.width and m.height via the Update handler.
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(
-		m.spinner.tick(),
-		tea.WindowSize(),
-		tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		}),
-	)
+	return m.spinner.Tick
 }
 
 // Update handles TUI messages.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Recover from panics and log them.
-	defer func() {
-		if r := recover(); r != nil {
-			if log := GetLogger(); log != nil {
-				log.Error("PANIC in Model.Update: %v", r)
-			}
-		}
-	}()
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -92,17 +84,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			m.quitting = true
-			if log := GetLogger(); log != nil {
-				log.Info("User pressed %s, quitting TUI", msg.String())
-			}
 			return m, tea.Quit
 		}
 		return m, nil
 
-	case tickMsg:
-		m.tickCount++
-		m.spinner.Update()
-		return m, m.spinner.tick()
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 
 	case core.ProgressEvent:
 		m.handleProgress(msg)
@@ -120,16 +109,17 @@ func (m *Model) View() string {
 
 	var b strings.Builder
 
-	// Always render a visible header, even before window size is known.
-	b.WriteString("=== LAN-iPXE Driver Scraper ===\n")
+	// Header
+	b.WriteString(headerStyle.Render("=== LAN-iPXE Driver Scraper ==="))
+	b.WriteString("\n")
 
 	// Separator
-	width := m.width
-	if width < 5 {
-		width = 40
+	sepWidth := m.width
+	if sepWidth < 20 {
+		sepWidth = 20
 	}
-	b.WriteString(strings.Repeat("-", width) + "\n")
-	b.WriteString("\n")
+	b.WriteString(separatorStyle.Render(strings.Repeat("─", sepWidth)))
+	b.WriteString("\n\n")
 
 	// Provider sections
 	b.WriteString(m.renderProviders())
@@ -137,7 +127,7 @@ func (m *Model) View() string {
 	// Overall progress
 	b.WriteString(m.renderOverall())
 
-	// Fill remaining space so the screen isn't blank
+	// Fill remaining space
 	remaining := m.height - m.estimateHeight()
 	if remaining < 0 {
 		remaining = 0
@@ -149,9 +139,9 @@ func (m *Model) View() string {
 		b.WriteString("\n")
 	}
 
-	// Footer — always visible
+	// Footer
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf(" [%s] Press q to quit\n", m.spinner.String()))
+	b.WriteString(fmt.Sprintf(" %s Press q to quit\n", m.spinner.View()))
 
 	return b.String()
 }
@@ -159,41 +149,34 @@ func (m *Model) View() string {
 func (m *Model) renderProviders() string {
 	var b strings.Builder
 
-	// Get provider names in insertion order
-	names := make([]string, 0, len(m.providerStates))
-	seen := make(map[string]bool)
-	for _, ev := range m.events {
-		if ev.Provider != "" && !seen[ev.Provider] {
-			names = append(names, ev.Provider)
-			seen[ev.Provider] = true
-		}
-	}
-
-	// Render each provider
-	for i, name := range names {
+	// Render each provider in insertion order
+	for _, name := range m.providerOrder {
 		ps := m.providerStates[name]
 		if ps == nil {
 			continue
 		}
 
 		// Provider header
-		b.WriteString(fmt.Sprintf(" [%s] (%d/%d devices)\n", ps.name, ps.done, ps.total))
+		header := fmt.Sprintf(" %s (%d/%d devices)",
+			providerStyle.Render(ps.name), ps.done, ps.total)
+		b.WriteString(header)
+		b.WriteString("\n")
 
 		// Provider progress bar
 		if ps.total > 0 {
-			b.WriteString(fmt.Sprintf("     [%s]\n", progressBarWithColor(float64(ps.done)/float64(ps.total), 20)))
+			fraction := float64(ps.done) / float64(ps.total)
+			bar := progressBarWithColor(fraction, 20)
+			b.WriteString(fmt.Sprintf("     %s\n", progressBarStyle.Render(bar)))
 		}
 
 		// Device lines
 		for _, ds := range ps.devices {
 			line := m.renderDeviceLine(ds)
-			b.WriteString(line + "\n")
-		}
-
-		// Separator between providers (not after last)
-		if i < len(names)-1 {
+			b.WriteString(line)
 			b.WriteString("\n")
 		}
+
+		b.WriteString("\n")
 	}
 
 	return b.String()
@@ -201,88 +184,63 @@ func (m *Model) renderProviders() string {
 
 func (m *Model) renderDeviceLine(ds *deviceState) string {
 	// Progress bar
-	bar := ""
+	var bar string
 	if ds.done {
-		bar = "████████████████"
+		bar = doneStyle.Render("████████████████")
 	} else if ds.failed {
-		bar = "████░░░░░░░░░░░░"
+		bar = failStyle.Render("████░░░░░░░░░░░░")
 	} else {
 		bar = progressBarWithColor(ds.progress, 16)
 	}
 
 	// Status symbol
-	status := " · "
+	var status string
 	if ds.done {
-		status = " ✓ "
+		status = doneStyle.Render(" ✓ ")
 	} else if ds.failed {
-		status = " ✗ "
+		status = failStyle.Render(" ✗ ")
 	} else if ds.progress > 0 {
-		status = " → "
+		status = statusStyle.Render(" → ")
+	} else {
+		status = statusStyle.Render(" · ")
 	}
 
 	// Version
 	version := ""
 	if ds.version != "" {
-		version = fmt.Sprintf(" v%s", ds.version)
+		version = versionStyle.Render(" v" + ds.version)
 	}
 
-	return fmt.Sprintf("  %s[%s] %s%s%s %s%s",
-		ds.prefix, ds.arch, bar, version, status, ds.status, ds.message)
+	return deviceStyle.Render(fmt.Sprintf("  %s[%s]%s%s%s%s",
+		ds.prefix, ds.arch, bar, version, status, ds.status))
 }
 
 func (m *Model) renderOverall() string {
-	var downloading, extracting int
-	for _, ev := range m.events[len(m.events)-min(20, len(m.events)):] {
-		switch ev.Type {
-		case core.EventDownloadStart:
-			downloading++
-		case core.EventDownloadProgress:
-			downloading++
-		case core.EventExtractStart:
-			extracting++
-		}
-	}
-
 	text := fmt.Sprintf("Overall: %d/%d devices complete", m.doneDevices, m.totalDevices)
-	if downloading > 0 {
-		text += fmt.Sprintf("    Downloading: %d", downloading)
+	if m.downloading > 0 {
+		text += fmt.Sprintf("    Downloading: %d", m.downloading)
 	}
-	if extracting > 0 {
-		text += fmt.Sprintf("    Extracting: %d", extracting)
+	if m.extracting > 0 {
+		text += fmt.Sprintf("    Extracting: %d", m.extracting)
 	}
 
-	return "\n" + text
+	return "\n" + overallStyle.Render(text)
 }
 
 func (m *Model) handleProgress(ev core.ProgressEvent) {
-	// Recover from panics and log them.
-	defer func() {
-		if r := recover(); r != nil {
-			if log := GetLogger(); log != nil {
-				log.Error("PANIC in handleProgress: event=%s provider=%s device=%s arch=%s error=%v",
-					ev.Type, ev.Provider, ev.Device, ev.Arch, r)
-			}
-		}
-	}()
-
-	m.events = append(m.events, ev)
-
-	ps, ok := m.providerStates[ev.Provider]
-	if !ok {
-		ps = &providerState{
+	// Track provider insertion order
+	if _, ok := m.providerStates[ev.Provider]; !ok {
+		m.providerOrder = append(m.providerOrder, ev.Provider)
+		m.providerStates[ev.Provider] = &providerState{
 			name:    ev.Provider,
 			devices: make(map[string]*deviceState),
 		}
-		m.providerStates[ev.Provider] = ps
 	}
 
-	log := GetLogger()
+	ps := m.providerStates[ev.Provider]
 
 	switch ev.Type {
 	case core.EventProviderStart:
-		if log != nil {
-			log.Info("Provider started: %s", ev.Provider)
-		}
 		ps.status = "Starting..."
 
 	case core.EventDeviceSearchStart:
@@ -293,9 +251,6 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 			ps.devices[key] = ds
 			ps.total++
 			m.totalDevices++
-			if log != nil {
-				log.Debug("New device: %s %s", ev.Device, ev.Arch)
-			}
 		}
 		ds.status = ev.Status
 		ds.message = ev.Message
@@ -312,9 +267,6 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 			ds.version = ev.Version
 			ds.status = ev.Status
 			ds.message = ev.Message
-			if log != nil {
-				log.Info("Package selected: %s %s v%s", ev.Device, ev.Arch, ev.Version)
-			}
 		}
 
 	case core.EventDownloadStart:
@@ -322,9 +274,7 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 		if ds, ok := ps.devices[key]; ok {
 			ds.status = "Downloading..."
 			ds.progress = 0
-			if log != nil {
-				log.Info("Download started: %s %s", ev.Device, ev.Arch)
-			}
+			m.downloading++
 		}
 
 	case core.EventDownloadProgress:
@@ -341,18 +291,14 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 			ds.progress = 1.0
 			ds.status = "Download complete"
 			ds.message = ev.Message
-			if log != nil {
-				log.Info("Download complete: %s %s", ev.Device, ev.Arch)
-			}
+			m.downloading--
 		}
 
 	case core.EventExtractStart:
 		key := deviceKey(ev.Device, ev.Arch)
 		if ds, ok := ps.devices[key]; ok {
 			ds.status = "Extracting..."
-			if log != nil {
-				log.Info("Extract started: %s %s", ev.Device, ev.Arch)
-			}
+			m.extracting++
 		}
 
 	case core.EventExtractDone:
@@ -360,32 +306,28 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 		if ds, ok := ps.devices[key]; ok {
 			ds.status = "Extract complete"
 			ds.message = ev.Message
-			if log != nil {
-				log.Info("Extract complete: %s %s", ev.Device, ev.Arch)
-			}
+			m.extracting--
 		}
 
 	case core.EventProviderDone:
-		key := deviceKey(ev.Device, ev.Arch)
-		if ds, ok := ps.devices[key]; ok {
-			ds.done = true
-			ds.status = ev.Status
-			m.doneDevices++
-			ps.done++
+		// Distinguish per-device vs per-provider events
+		if ev.Device != "" && ev.Arch != "" {
+			// Per-device completion
+			key := deviceKey(ev.Device, ev.Arch)
+			if ds, ok := ps.devices[key]; ok {
+				ds.done = true
+				ds.status = ev.Status
+				m.doneDevices++
+				ps.done++
+			}
 		}
 		ps.status = "Complete"
 		ps.message = ev.Message
-		if log != nil {
-			log.Info("Provider done: %s - %s", ev.Provider, ev.Message)
-		}
 
 	case core.EventProviderFailed:
 		ps.failed++
 		ps.status = "Failed"
 		ps.message = ev.Message
-		if log != nil {
-			log.Error("Provider failed: %s - %s", ev.Provider, ev.Message)
-		}
 	}
 }
 
@@ -405,22 +347,3 @@ func deviceKey(device, arch string) string {
 	}
 	return device
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-type tickMsg time.Time
-
-// ProgressEvent is a type alias for core.ProgressEvent used as a Bubble Tea message.
-type ProgressEvent core.ProgressEvent

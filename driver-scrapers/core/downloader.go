@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// progressThresholds tracks which tenths-of-percent we've already reported
+// to avoid spamming progress events.
+type progressThresholds struct {
+	lastTenth int
+}
+
 // downloadPackage downloads a CAB file from the catalog.
 func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 	o.buildOutputPaths(pkg)
@@ -62,6 +68,8 @@ func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 	totalSize := resp.ContentLength
 	var bytesWritten int64
 	startTime := time.Now()
+	// Track which progress percentages we've already reported (in tenths of a percent)
+	lastReportedTenth := -1
 
 	buf := make([]byte, 1024*1024) // 1MB buffer
 	for {
@@ -75,23 +83,26 @@ func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 				return fmt.Errorf("write error: %w", ew)
 			}
 
-			// Report progress
+			// Report progress only when we've advanced by at least 0.1 (1/1000)
+			// and only if we know the total size
 			progress := 0.0
 			if totalSize > 0 {
 				progress = float64(bytesWritten) / float64(totalSize)
-			}
-			if int(progress*10) != int(((bytesWritten-int64(nw))/totalSize)*10) || bytesWritten == int64(nw) {
-				elapsed := time.Since(startTime).Seconds()
-				speed := float64(bytesWritten) / 1024 / 1024 / elapsed
-				o.progress.Send(ProgressEvent{
-					Type:     EventDownloadProgress,
-					Provider: o.provider.Name(),
-					Device:   pkg.DevicePrefix,
-					Arch:     pkg.Arch,
-					Progress: progress,
-					Status:   fmt.Sprintf("Downloading... %.1f MB/s", speed),
-					Message:  fmt.Sprintf("%.1f / %.1f MB", float64(bytesWritten)/1024/1024, float64(totalSize)/1024/1024),
-				})
+				reportedTenth := int(progress * 1000) // track in thousandths
+				if reportedTenth-lastReportedTenth >= 1 {
+					lastReportedTenth = reportedTenth
+					elapsed := time.Since(startTime).Seconds()
+					speed := float64(bytesWritten) / 1024 / 1024 / max(elapsed, 0.001)
+					o.progress.Send(ProgressEvent{
+						Type:     EventDownloadProgress,
+						Provider: o.provider.Name(),
+						Device:   pkg.DevicePrefix,
+						Arch:     pkg.Arch,
+						Progress: progress,
+						Status:   fmt.Sprintf("Downloading... %.1f MB/s", speed),
+						Message:  fmt.Sprintf("%.1f / %.1f MB", float64(bytesWritten)/1024/1024, float64(totalSize)/1024/1024),
+					})
+				}
 			}
 		}
 		if err == io.EOF {

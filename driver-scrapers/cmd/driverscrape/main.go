@@ -98,43 +98,58 @@ func main() {
 		Verbose:        *verbose,
 	}
 
-	// Run TUI or plain output in a goroutine and wait for it to finish
-	tuiDone := make(chan struct{})
-	go func() {
-		if *noTUI {
-			runPlainOutput(progressChan, selectedProviders)
-		} else {
-			runTUI(progressChan)
-		}
-		close(tuiDone)
-	}()
-
-	// Give the TUI a moment to set up before providers start
-	time.Sleep(100 * time.Millisecond)
-
-	// Run providers concurrently
+	// Run providers in a background goroutine
 	var wg sync.WaitGroup
 	results := make([]*core.ProviderResult, len(selectedProviders))
 
-	for i, p := range selectedProviders {
-		wg.Add(1)
-		go func(idx int, prov core.DriverProvider) {
-			defer wg.Done()
+	if *noTUI {
+		// Plain output mode: run providers and print results
+		go func() {
+			for i, p := range selectedProviders {
+				wg.Add(1)
+				go func(idx int, prov core.DriverProvider) {
+					defer wg.Done()
+					orch := core.NewOrchestrator(prov, cfg, progressChan)
+					results[idx] = orch.Run()
+				}(i, p)
+			}
+			wg.Wait()
+			close(progressChan)
+		}()
+		runPlainOutput(progressChan, selectedProviders, results)
+	} else {
+		// TUI mode: providers run in background, TUI runs on main goroutine
+		// Bubble Tea MUST run on the main goroutine because it takes over stdin/stdout
+		model := tui.NewModel()
+		p := tea.NewProgram(model)
 
-			// Create orchestrator
-			orch := core.NewOrchestrator(prov, cfg, progressChan)
+		// Start providers in a background goroutine
+		go func() {
+			for i, p := range selectedProviders {
+				wg.Add(1)
+				go func(idx int, prov core.DriverProvider) {
+					defer wg.Done()
+					orch := core.NewOrchestrator(prov, cfg, progressChan)
+					results[idx] = orch.Run()
+				}(i, p)
+			}
+			wg.Wait()
+			close(progressChan)
+		}()
 
-			// Run the orchestrator and store result
-			results[idx] = orch.Run()
-		}(i, p)
+		// Send progress events to the TUI in a goroutine.
+		// When the progress channel closes (all providers done), send tea.Quit
+		// so the TUI exits cleanly instead of blocking forever.
+		go func() {
+			for ev := range progressChan {
+				p.Send(ev)
+			}
+			p.Quit()
+		}()
+
+		// Run the TUI — this blocks until the model returns tea.Quit
+		p.Run()
 	}
-
-	// Wait for all providers to complete, then close the progress channel
-	wg.Wait()
-	close(progressChan)
-
-	// Wait for TUI/plain output to finish
-	<-tuiDone
 
 	// Print summary
 	fmt.Println()
@@ -216,45 +231,10 @@ func providerKeysList(m map[string]core.DriverProvider) []string {
 }
 
 // ====================================================================
-// TUI — uses the tui package with proper terminal capture
-// ====================================================================
-
-func runTUI(progressChan core.ProgressChan) {
-	model := tui.NewModel()
-
-	// CRITICAL: On Windows, bubbletea MUST be given explicit stdin/stdout
-	// bindings. Without WithInput(os.Stdin), bubbletea creates a program
-	// with a nil input channel, causing p.Wait() to deadlock forever.
-	//
-	// Additionally, we must use the legacy renderer (WithAltScreen(false)
-	// is not enough) because PowerShell's conhost does not properly support
-	// the ANSI renderer. The legacy renderer uses basic cursor positioning
-	// that works on all Windows terminals.
-	p := tea.NewProgram(
-		model,
-		tea.WithInput(os.Stdin),
-		tea.WithOutput(os.Stdout),
-		tea.WithAltScreen(),
-	)
-
-	// Send progress events to the TUI in a goroutine.
-	// When the progress channel closes (all providers done), send tea.Quit
-	// so the TUI exits cleanly instead of blocking forever.
-	go func() {
-		for ev := range progressChan {
-			p.Send(ev)
-		}
-		p.Quit()
-	}()
-
-	p.Wait()
-}
-
-// ====================================================================
 // Plain output
 // ====================================================================
 
-func runPlainOutput(progressChan core.ProgressChan, providers []core.DriverProvider) {
+func runPlainOutput(progressChan core.ProgressChan, providers []core.DriverProvider, results []*core.ProviderResult) {
 	type deviceKey struct {
 		provider string
 		device   string

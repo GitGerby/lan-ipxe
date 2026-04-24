@@ -3,7 +3,10 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // SearchResult represents a candidate driver package found in the catalog.
@@ -55,7 +58,6 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 	}
 
 	var allResults []*SearchResult
-	var wg sync.WaitGroup
 
 	// Throttle detail page fetches globally
 	sem := make(chan struct{}, cfg.DetailThrottle)
@@ -108,6 +110,7 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 		// Fetch details for each update ID in parallel (throttled)
 		var detailResults []*SearchResult
 		var detailMu sync.Mutex
+		var wg sync.WaitGroup
 
 		for _, id := range updateIDs {
 			select {
@@ -116,12 +119,13 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 			default:
 			}
 
-			sem <- struct{}{} // Acquire semaphore
 			wg.Add(1)
-
 			go func(updateID string) {
 				defer wg.Done()
-				<-sem // Release semaphore
+
+				// Acquire semaphore inside the goroutine (blocks if at limit)
+				sem <- struct{}{}
+				defer func() { <-sem }()
 
 				detail, err := client.GetDetail(updateID)
 				if err != nil {
@@ -138,7 +142,7 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 				}
 
 				// Check NDIS exclusion
-				if cfg.ExcludeNDIS && detail.Title != "" && containsStr(detail.Title, "NDIS") {
+				if cfg.ExcludeNDIS && strings.Contains(strings.ToLower(detail.Title), "ndis") {
 					return
 				}
 
@@ -167,7 +171,7 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 func SearchDevices(ctx context.Context, client *CatalogClient, devices []SearchDevice, cfg *SearchConfig) (map[string][]*SearchResult, error) {
 	results := make(map[string][]*SearchResult)
 	var mu sync.Mutex
-	var g errGroup
+	g, ctx := errgroup.WithContext(ctx)
 
 	for _, dev := range devices {
 		dev := dev
@@ -194,63 +198,4 @@ func contains(slice []string, s string) bool {
 		}
 	}
 	return false
-}
-
-// containsStr checks if a string contains a substring (case-insensitive).
-func containsStr(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && containsStrImpl(s, substr)
-}
-
-func containsStrImpl(s, substr string) bool {
-	s = toLowerASCII(s)
-	substr = toLowerASCII(substr)
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func toLowerASCII(s string) string {
-	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			result[i] = c + 32
-		} else {
-			result[i] = c
-		}
-	}
-	return string(result)
-}
-
-// errGroup is a simple error group similar to golang.org/x/sync/errgroup
-// but without external dependencies for now.
-type errGroup struct {
-	errs []error
-	mu   sync.Mutex
-	wg   sync.WaitGroup
-}
-
-func (g *errGroup) Go(fn func() error) {
-	g.wg.Add(1)
-	go func() {
-		defer g.wg.Done()
-		if err := fn(); err != nil {
-			g.mu.Lock()
-			g.errs = append(g.errs, err)
-			g.mu.Unlock()
-		}
-	}()
-}
-
-func (g *errGroup) Wait() error {
-	g.wg.Wait()
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if len(g.errs) == 0 {
-		return nil
-	}
-	return g.errs[0]
 }
