@@ -104,9 +104,9 @@ func (p *realtek) ExcludeNDIS() bool                         { return false }
 func NewQualcomm() core.DriverProvider {
 	return &qualcomm{
 		devices: []core.DeviceTarget{
-			{Prefix: "QCA6390", HWID: "VEN_168C&DEV_0044", FamilyName: "QCA6390", Queries: []string{"QCA6390 Windows 11"}, PreferredBranches: []string{"3.0"}},
-			{Prefix: "WCN6855", HWID: "VEN_168C&DEV_006E", FamilyName: "WCN6855", Queries: []string{"WCN6855 Windows 11"}, PreferredBranches: []string{"3.0"}},
-			{Prefix: "WCN7850", HWID: "VEN_168C&DEV_0073", FamilyName: "WCN7850", Queries: []string{"WCN7850 Windows 11"}, PreferredBranches: []string{"3.1"}},
+			{Prefix: "QCA6390", HWID: "VEN_168C&DEV_0044", FamilyName: "QCA6390", Queries: []string{"VEN_17CB&DEV_1101", "Killer AX500"}, PreferredBranches: []string{"3.0"}},
+			{Prefix: "WCN6855", HWID: "VEN_168C&DEV_006E", FamilyName: "WCN6855", Queries: []string{"VEN_17CB&DEV_1103", "FastConnect 6900"}, PreferredBranches: []string{"3.0"}},
+			{Prefix: "WCN7850", HWID: "VEN_168C&DEV_0073", FamilyName: "WCN7850", Queries: []string{"VEN_17CB&DEV_1107", "FastConnect 7800"}, PreferredBranches: []string{"3.1"}},
 		},
 	}
 }

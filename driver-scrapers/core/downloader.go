@@ -8,12 +8,6 @@ import (
 	"path/filepath"
 )
 
-// progressThresholds tracks which tenths-of-percent we've already reported
-// to avoid spamming progress events.
-type progressThresholds struct {
-	lastTenth int
-}
-
 // downloadPackage downloads a CAB file from the catalog.
 func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 	o.buildOutputPaths(pkg)
