@@ -217,6 +217,7 @@ func (o *Orchestrator) Run() *ProviderResult {
 
 	// Search
 	searchCfg := &SearchConfig{
+		ProviderName:   o.provider.Name(),
 		AcceptedArchs:  o.cfg.AcceptedArchs,
 		DetailThrottle: o.cfg.DetailThrottle,
 		ExcludeNDIS:    o.provider.ExcludeNDIS(),

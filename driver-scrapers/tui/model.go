@@ -381,7 +381,7 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 		key := deviceKey(ev.Device, ev.Arch)
 		if ds, ok := ps.devices[key]; ok {
 			ds.progress = 1.0
-			ds.phase = "selected" // downloaded but not extracted yet
+			ds.phase = "downloaded" // downloaded but not extracted yet
 			m.downloading--
 			ps.status = fmt.Sprintf("Downloaded %s", ev.Device)
 			if ps.activeDeviceKey == key {

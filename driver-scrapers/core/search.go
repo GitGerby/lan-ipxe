@@ -29,6 +29,8 @@ type SearchDevice struct {
 
 // SearchConfig holds configuration for catalog search operations.
 type SearchConfig struct {
+	// ProviderName is the name of the provider (e.g., "Intel Ethernet")
+	ProviderName string
 	// AcceptedArchs are the architectures to accept (e.g., "AMD64", "ARM64")
 	AcceptedArchs []string
 	// DetailThrottle limits concurrent detail page fetches
@@ -72,9 +74,10 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 		// Report search start - include device name for TUI
 		if cfg.Progress != nil {
 			cfg.Progress.Send(ProgressEvent{
-				Type:   EventDeviceSearchStart,
-				Device: dev.Prefix,
-				Status: fmt.Sprintf("Searching %s...", dev.Prefix),
+				Type:     EventDeviceSearchStart,
+				Provider: cfg.ProviderName,
+				Device:   dev.Prefix,
+				Status:   fmt.Sprintf("Searching %s...", dev.Prefix),
 			})
 		}
 
@@ -84,10 +87,11 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 			// Don't fail on single query error, try next query
 			if cfg.Progress != nil {
 				cfg.Progress.Send(ProgressEvent{
-					Type:    EventDeviceSearchStart,
-					Device:  dev.Prefix,
-					Status:  "Search failed",
-					Message: err.Error(),
+					Type:     EventDeviceSearchStart,
+					Provider: cfg.ProviderName,
+					Device:   dev.Prefix,
+					Status:   "Search failed",
+					Message:  err.Error(),
 				})
 			}
 			continue
@@ -100,6 +104,7 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 		if cfg.Progress != nil {
 			cfg.Progress.Send(ProgressEvent{
 				Type:     EventDeviceSearchStart,
+				Provider: cfg.ProviderName,
 				Device:   dev.Prefix,
 				Status:   fmt.Sprintf("Found %d result(s)", len(updateIDs)),
 				Progress: 1.0,
