@@ -69,12 +69,12 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 		default:
 		}
 
-		// Report search start
+		// Report search start - include device name for TUI
 		if cfg.Progress != nil {
 			cfg.Progress.Send(ProgressEvent{
 				Type:   EventDeviceSearchStart,
 				Device: dev.Prefix,
-				Status: fmt.Sprintf("Searching: %s", query),
+				Status: fmt.Sprintf("Searching %s...", dev.Prefix),
 			})
 		}
 
@@ -101,8 +101,7 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 			cfg.Progress.Send(ProgressEvent{
 				Type:     EventDeviceSearchStart,
 				Device:   dev.Prefix,
-				Status:   fmt.Sprintf("Found %d packages", len(updateIDs)),
-				Message:  fmt.Sprintf("Query: %s", query),
+				Status:   fmt.Sprintf("Found %d result(s)", len(updateIDs)),
 				Progress: 1.0,
 			})
 		}

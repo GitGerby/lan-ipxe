@@ -24,7 +24,7 @@ func (o *Orchestrator) extractPackage(pkg *DriverPackage) error {
 		Provider: o.provider.Name(),
 		Device:   pkg.DevicePrefix,
 		Arch:     pkg.Arch,
-		Status:   "Extracting...",
+		Status:   "Extracting",
 		Message:  filepath.Base(pkg.CabPath),
 	})
 
@@ -46,7 +46,7 @@ func (o *Orchestrator) extractPackage(pkg *DriverPackage) error {
 		Arch:     pkg.Arch,
 		Version:  pkg.Version,
 		Progress: 1.0,
-		Status:   "Extract complete",
+		Status:   "Extracted",
 		Message:  fmt.Sprintf("%d files", len(files)),
 	})
 

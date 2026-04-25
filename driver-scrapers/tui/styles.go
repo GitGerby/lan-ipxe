@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -59,19 +61,19 @@ func progressBarWithColor(fraction float64, width int) string {
 		filled = width
 	}
 
-	var sb string
+	var sb strings.Builder
 	for i := 0; i < width; i++ {
 		if i < filled {
 			if fraction >= 1.0 {
-				sb += lipgloss.NewStyle().SetString("█").String()
+				sb.WriteString(lipgloss.NewStyle().SetString("█").String())
 			} else if fraction >= 0.5 {
-				sb += lipgloss.NewStyle().Foreground(lipgloss.Color("34")).SetString("█").String()
+				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("34")).SetString("█").String())
 			} else {
-				sb += lipgloss.NewStyle().Foreground(lipgloss.Color("220")).SetString("█").String()
+				sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("220")).SetString("█").String())
 			}
 		} else {
-			sb += lipgloss.NewStyle().Foreground(lipgloss.Color("235")).SetString("░").String()
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("235")).SetString("░").String())
 		}
 	}
-	return sb
+	return sb.String()
 }

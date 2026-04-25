@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 // progressThresholds tracks which tenths-of-percent we've already reported
@@ -31,7 +30,7 @@ func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 		Provider: o.provider.Name(),
 		Device:   pkg.DevicePrefix,
 		Arch:     pkg.Arch,
-		Status:   "Downloading...",
+		Status:   "Downloading",
 		Message:  filepath.Base(pkg.CabPath),
 	})
 
@@ -67,7 +66,6 @@ func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 	// Get content length for progress
 	totalSize := resp.ContentLength
 	var bytesWritten int64
-	startTime := time.Now()
 	// Track which progress percentages we've already reported (in tenths of a percent)
 	lastReportedTenth := -1
 
@@ -91,16 +89,14 @@ func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 				reportedTenth := int(progress * 1000) // track in thousandths
 				if reportedTenth-lastReportedTenth >= 1 {
 					lastReportedTenth = reportedTenth
-					elapsed := time.Since(startTime).Seconds()
-					speed := float64(bytesWritten) / 1024 / 1024 / max(elapsed, 0.001)
 					o.progress.Send(ProgressEvent{
 						Type:     EventDownloadProgress,
 						Provider: o.provider.Name(),
 						Device:   pkg.DevicePrefix,
 						Arch:     pkg.Arch,
 						Progress: progress,
-						Status:   fmt.Sprintf("Downloading... %.1f MB/s", speed),
-						Message:  fmt.Sprintf("%.1f / %.1f MB", float64(bytesWritten)/1024/1024, float64(totalSize)/1024/1024),
+						Status:   "Downloading",
+						Message:  fmt.Sprintf("%.1f/%.1f MB", float64(bytesWritten)/1024/1024, float64(totalSize)/1024/1024),
 					})
 				}
 			}
@@ -129,7 +125,7 @@ func (o *Orchestrator) downloadPackage(pkg *DriverPackage) error {
 		Arch:     pkg.Arch,
 		Version:  pkg.Version,
 		Progress: 1.0,
-		Status:   "Download complete",
+		Status:   "Downloaded",
 		Message:  fmt.Sprintf("%.1f MB", float64(info.Size())/1024/1024),
 	})
 

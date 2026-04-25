@@ -200,7 +200,7 @@ func (o *Orchestrator) Run() *ProviderResult {
 	o.progress.Send(ProgressEvent{
 		Type:     EventProviderStart,
 		Provider: o.provider.Name(),
-		Status:   "Starting...",
+		Status:   "Starting",
 	})
 
 	// Build search devices
