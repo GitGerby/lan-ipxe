@@ -4,7 +4,10 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Event type constants
@@ -238,17 +241,7 @@ func (o *Orchestrator) Run() *ProviderResult {
 		Progress:       o.progress,
 	}
 
-	searchResults, err := SearchDevices(o.ctx, o.client, devices, searchCfg)
-	if err != nil {
-		result.Errors = append(result.Errors, err)
-		o.progress.Send(ProgressEvent{
-			Type:     EventProviderFailed,
-			Provider: o.provider.Name(),
-			Status:   "Search failed",
-			Message:  err.Error(),
-		})
-		return result
-	}
+	searchResults := SearchDevices(o.ctx, o.client, devices, searchCfg)
 
 	// Select best package per device+arch
 	packages := o.selectPackages(searchResults)
@@ -263,58 +256,74 @@ func (o *Orchestrator) Run() *ProviderResult {
 		return result
 	}
 
-	// Download and extract each package
-	for _, pkg := range packages {
-		select {
-		case <-o.ctx.Done():
-			result.Skipped++
-			continue
-		default:
-		}
+	// Download and extract each package in parallel (throttled by MaxDownloads)
+	if len(packages) > 0 {
+		g, ctx := errgroup.WithContext(o.ctx)
+		g.SetLimit(o.cfg.MaxDownloads)
 
-		if !o.cfg.NoDownload {
-			if err := o.downloadPackage(pkg); err != nil {
-				result.Failed++
-				result.Errors = append(result.Errors, err)
+		var successCount, failedCount, skippedCount int32
+
+		for _, pkg := range packages {
+			pkg := pkg
+			g.Go(func() error {
+				select {
+				case <-ctx.Done():
+					atomic.AddInt32(&skippedCount, 1)
+					return nil // non-fatal cancellation
+				default:
+				}
+
+				// Download
+				if !o.cfg.NoDownload {
+					if err := o.downloadPackage(pkg); err != nil {
+						atomic.AddInt32(&failedCount, 1)
+						o.progress.Send(ProgressEvent{
+							Type:     EventProviderFailed,
+							Provider: o.provider.Name(),
+							Device:   pkg.DevicePrefix,
+							Arch:     pkg.Arch,
+							Status:   "Failed",
+							Message:  err.Error(),
+						})
+						return err // fail this package, continue others
+					}
+				}
+
+				// Extract
+				if !o.cfg.NoExtract {
+					if err := o.extractPackage(pkg); err != nil {
+						atomic.AddInt32(&failedCount, 1)
+						o.progress.Send(ProgressEvent{
+							Type:     EventProviderFailed,
+							Provider: o.provider.Name(),
+							Device:   pkg.DevicePrefix,
+							Arch:     pkg.Arch,
+							Status:   "Extract failed",
+							Message:  err.Error(),
+						})
+						return err // fail this package, continue others
+					}
+				}
+
+				atomic.AddInt32(&successCount, 1)
+				// Send per-device completion event (not provider-level)
 				o.progress.Send(ProgressEvent{
-					Type:     EventProviderFailed,
+					Type:     EventDeviceComplete,
 					Provider: o.provider.Name(),
 					Device:   pkg.DevicePrefix,
 					Arch:     pkg.Arch,
-					Status:   "Failed",
-					Message:  err.Error(),
+					Version:  pkg.Version,
+					Status:   "Complete",
+					Progress: 1.0,
 				})
-				continue
-			}
+				return nil
+			})
 		}
 
-		if !o.cfg.NoExtract {
-			if err := o.extractPackage(pkg); err != nil {
-				result.Failed++
-				result.Errors = append(result.Errors, err)
-				o.progress.Send(ProgressEvent{
-					Type:     EventProviderFailed,
-					Provider: o.provider.Name(),
-					Device:   pkg.DevicePrefix,
-					Arch:     pkg.Arch,
-					Status:   "Extract failed",
-					Message:  err.Error(),
-				})
-				continue
-			}
-		}
-
-		result.Success++
-		// Send per-device completion event (not provider-level)
-		o.progress.Send(ProgressEvent{
-			Type:     EventDeviceComplete,
-			Provider: o.provider.Name(),
-			Device:   pkg.DevicePrefix,
-			Arch:     pkg.Arch,
-			Version:  pkg.Version,
-			Status:   "Complete",
-			Progress: 1.0,
-		})
+		g.Wait()
+		result.Success = int(atomic.LoadInt32(&successCount))
+		result.Failed = int(atomic.LoadInt32(&failedCount))
+		result.Skipped = int(atomic.LoadInt32(&skippedCount))
 	}
 
 	o.progress.Send(ProgressEvent{

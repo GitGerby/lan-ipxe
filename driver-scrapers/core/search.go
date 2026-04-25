@@ -3,9 +3,12 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -51,8 +54,39 @@ func DefaultSearchConfig() *SearchConfig {
 	}
 }
 
+// errorLogMu protects the errorLogFiles map.
+var errorLogMu sync.Mutex
+
+// errorLogFiles maps device names to their error log file handles.
+var errorLogFiles = make(map[string]*os.File)
+
+// openSearchErrorLog opens (or reuses) an error log file for a device.
+func openSearchErrorLog(device string) (*os.File, string) {
+	errorLogMu.Lock()
+	defer errorLogMu.Unlock()
+
+	if f, ok := errorLogFiles[device]; ok {
+		return f, ""
+	}
+
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("driver-search-errors-%s-%d.log", sanitizeFilename(device), time.Now().UnixNano()))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, ""
+	}
+	errorLogFiles[device] = f
+	return f, path
+}
+
+// logSearchError writes a non-fatal error to the device's error log file.
+func logSearchError(f *os.File, device, updateID string, err error) {
+	if f != nil {
+		fmt.Fprintf(f, "%s [%s] [%s]: %v\n", time.Now().Format(time.RFC3339), device, updateID, err)
+	}
+}
+
 // SearchDeviceWithContext searches the catalog for a single device and returns all matching results.
-func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev SearchDevice, cfg *SearchConfig) ([]*SearchResult, error) {
+func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev SearchDevice, cfg *SearchConfig) []*SearchResult {
 	var queries []string
 	if len(dev.Queries) > 0 {
 		queries = dev.Queries
@@ -62,13 +96,10 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 
 	var allResults []*SearchResult
 
-	// Throttle detail page fetches globally
-	sem := make(chan struct{}, cfg.DetailThrottle)
-
 	for _, query := range queries {
 		select {
 		case <-ctx.Done():
-			return allResults, ctx.Err()
+			return allResults
 		default:
 		}
 
@@ -112,43 +143,44 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 			})
 		}
 
-		// Fetch details for each update ID in parallel (throttled)
+		// Fetch details for each update ID in parallel (throttled by errgroup)
 		var detailResults []*SearchResult
 		var detailMu sync.Mutex
-		var wg sync.WaitGroup
+		errFile, _ := openSearchErrorLog(dev.Prefix)
+		if errFile != nil {
+			defer errFile.Close()
+		}
+
+		g, ctx := errgroup.WithContext(ctx)
+		g.SetLimit(cfg.DetailThrottle)
 
 		for _, id := range updateIDs {
-			select {
-			case <-ctx.Done():
-				return allResults, ctx.Err()
-			default:
-			}
+			id := id
+			g.Go(func() error {
+				select {
+				case <-ctx.Done():
+					return nil // non-fatal cancellation
+				default:
+				}
 
-			wg.Add(1)
-			go func(updateID string) {
-				defer wg.Done()
-
-				// Acquire semaphore inside the goroutine (blocks if at limit)
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				detail, err := client.GetDetail(updateID)
+				detail, err := client.GetDetail(id)
 				if err != nil {
-					return
+					logSearchError(errFile, dev.Prefix, id, fmt.Errorf("get detail: %w", err))
+					return nil // non-fatal
 				}
 
 				if detail.Version == "" || detail.Date.IsZero() {
-					return
+					return nil // non-fatal: invalid detail
 				}
 
 				// Check architecture
 				if !slices.Contains(cfg.AcceptedArchs, detail.Arch) {
-					return
+					return nil // non-fatal: wrong architecture
 				}
 
 				// Check NDIS exclusion
 				if cfg.ExcludeNDIS && strings.Contains(strings.ToLower(detail.Title), "ndis") {
-					return
+					return nil // non-fatal: NDIS excluded
 				}
 
 				result := &SearchResult{
@@ -162,28 +194,27 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 				detailMu.Lock()
 				detailResults = append(detailResults, result)
 				detailMu.Unlock()
-			}(id)
+				return nil
+			})
 		}
 
-		wg.Wait()
+		g.Wait() // always nil since all Go() calls return nil
 		allResults = append(allResults, detailResults...)
 	}
 
-	return allResults, nil
+	return allResults
 }
 
 // SearchDevices searches the catalog for multiple devices concurrently.
-func SearchDevices(ctx context.Context, client *CatalogClient, devices []SearchDevice, cfg *SearchConfig) (map[string][]*SearchResult, error) {
+func SearchDevices(ctx context.Context, client *CatalogClient, devices []SearchDevice, cfg *SearchConfig) map[string][]*SearchResult {
 	results := make(map[string][]*SearchResult)
 	var mu sync.Mutex
 	g, ctx := errgroup.WithContext(ctx)
 
 	for _, dev := range devices {
+		dev := dev
 		g.Go(func() error {
-			devResults, err := SearchDeviceWithContext(ctx, client, dev, cfg)
-			if err != nil {
-				return err
-			}
+			devResults := SearchDeviceWithContext(ctx, client, dev, cfg)
 			mu.Lock()
 			results[dev.Prefix] = devResults
 			mu.Unlock()
@@ -191,5 +222,6 @@ func SearchDevices(ctx context.Context, client *CatalogClient, devices []SearchD
 		})
 	}
 
-	return results, g.Wait()
+	g.Wait() // always nil
+	return results
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/gitgerby/lan-ipxe/driver-scrapers/core"
 	"github.com/gitgerby/lan-ipxe/driver-scrapers/providers"
 	"github.com/gitgerby/lan-ipxe/driver-scrapers/tui"
+	"golang.org/x/sync/errgroup"
 )
 
 var version = "dev"
@@ -98,22 +100,24 @@ func main() {
 		Verbose:        *verbose,
 	}
 
-	// Run providers in a background goroutine
-	var wg sync.WaitGroup
+	// Run providers in a background goroutine using errgroup
 	results := make([]*core.ProviderResult, len(selectedProviders))
+	g, _ := errgroup.WithContext(context.Background())
+
+	for i, p := range selectedProviders {
+		prov := p
+		idx := i
+		g.Go(func() error {
+			orch := core.NewOrchestrator(prov, cfg, progressChan)
+			results[idx] = orch.Run()
+			return nil
+		})
+	}
 
 	if *noTUI {
 		// Plain output mode: run providers and print results
 		go func() {
-			for i, p := range selectedProviders {
-				wg.Add(1)
-				go func(idx int, prov core.DriverProvider) {
-					defer wg.Done()
-					orch := core.NewOrchestrator(prov, cfg, progressChan)
-					results[idx] = orch.Run()
-				}(i, p)
-			}
-			wg.Wait()
+			g.Wait()
 			close(progressChan)
 		}()
 		runPlainOutput(progressChan, selectedProviders, results)
@@ -125,15 +129,7 @@ func main() {
 
 		// Start providers in a background goroutine
 		go func() {
-			for i, p := range selectedProviders {
-				wg.Add(1)
-				go func(idx int, prov core.DriverProvider) {
-					defer wg.Done()
-					orch := core.NewOrchestrator(prov, cfg, progressChan)
-					results[idx] = orch.Run()
-				}(i, p)
-			}
-			wg.Wait()
+			g.Wait()
 			close(progressChan)
 		}()
 
