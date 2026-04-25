@@ -29,6 +29,8 @@ type SearchDevice struct {
 	FamilyName        string
 	Queries           []string
 	PreferredBranches []string
+	SelectionStrategy SelectionStrategy
+	ExcludeNDIS       bool
 }
 
 // SearchConfig holds configuration for catalog search operations.

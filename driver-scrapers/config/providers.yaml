@@ -1,0 +1,231 @@
+providers:
+  - name: "Intel Ethernet"
+    key: "intel-eth"
+    devices:
+      - prefix: "I225-V"
+        hwid: "VEN_8086&DEV_15F3"
+        family_name: "I225"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "I226-V"
+        hwid: "VEN_8086&DEV_121F"
+        family_name: "I226"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "I219-V"
+        hwid: "VEN_8086&DEV_15FB"
+        family_name: "I219"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "I210"
+        hwid: "VEN_8086&DEV_153A"
+        family_name: "I210"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "X540"
+        hwid: "VEN_8086&DEV_1528"
+        family_name: "X540"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "X550"
+        hwid: "VEN_8086&DEV_15C1"
+        family_name: "X550"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "X710"
+        hwid: "VEN_8086&DEV_158B"
+        family_name: "X710"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "E810"
+        hwid: "VEN_8086&DEV_15C3"
+        family_name: "E810"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "IAVF"
+        hwid: "VEN_8086&DEV_1889"
+        family_name: "IAVF"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+
+  - name: "Intel WiFi"
+    key: "intel-wifi"
+    devices:
+      - prefix: "BE200"
+        hwid: "VEN_8086&DEV_2725"
+        family_name: "BE200"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "AX200"
+        hwid: "VEN_8086&DEV_2723"
+        family_name: "AX200"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+
+  - name: "Marvell Ethernet"
+    key: "marvell"
+    devices:
+      - prefix: "AQC107"
+        hwid: "VEN_14A5&DEV_AQC107"
+        family_name: "AQC107"
+        queries:
+          - "AQC-107T"
+          - "AQC107"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "AQC113"
+        hwid: "VEN_14A5&DEV_AQC113"
+        family_name: "AQC113"
+        queries:
+          - "AQC-113"
+          - "AQC113"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "AQC111U"
+        hwid: "VEN_14A5&DEV_AQC111"
+        family_name: "AQC111U"
+        queries:
+          - "AQC-111U"
+          - "AQC111U"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+
+  - name: "Realtek Ethernet"
+    key: "realtek"
+    devices:
+      - prefix: "RTL8125"
+        hwid: "VEN_10EC&DEV_8125"
+        family_name: "RTL8125"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "RTL8126"
+        hwid: "VEN_10EC&DEV_9200"
+        family_name: "RTL8126"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "RTL8127"
+        hwid: "VEN_10EC&DEV_8127"
+        family_name: "RTL8127"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "RTL8168"
+        hwid: "VEN_10EC&DEV_8168"
+        family_name: "RTL8168"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "RTL8153"
+        hwid: "VEN_10EC&DEV_8153"
+        family_name: "RTL8153"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "RTL8156"
+        hwid: "VEN_10EC&DEV_8156"
+        family_name: "RTL8156"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "RTL8157"
+        hwid: "VEN_10EC&DEV_8157"
+        family_name: "RTL8157"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+      - prefix: "RTL8159"
+        hwid: "VEN_10EC&DEV_8159"
+        family_name: "RTL8159"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+
+  - name: "Qualcomm WiFi"
+    key: "qualcomm"
+    devices:
+      - prefix: "QCA6390"
+        hwid: "VEN_168C&DEV_0044"
+        family_name: "QCA6390"
+        queries:
+          - "VEN_17CB&DEV_1101"
+          - "Killer AX500"
+        preferred_branches:
+          - "3.0"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+      - prefix: "WCN6855"
+        hwid: "VEN_168C&DEV_006E"
+        family_name: "WCN6855"
+        queries:
+          - "VEN_17CB&DEV_1103"
+          - "FastConnect 6900"
+        preferred_branches:
+          - "3.0"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+      - prefix: "WCN7850"
+        hwid: "VEN_168C&DEV_0073"
+        family_name: "WCN7850"
+        queries:
+          - "VEN_17CB&DEV_1107"
+          - "FastConnect 7800"
+        preferred_branches:
+          - "3.1"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+
+  - name: "MediaTek WiFi"
+    key: "mediatek"
+    devices:
+      - prefix: "MT7921_Filogic330"
+        hwid: "VEN_14C3&DEV_0616"
+        family_name: "MT7921_Filogic330"
+        queries:
+          - "MT7921 Windows 11"
+        preferred_branches:
+          - "3.5"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+      - prefix: "MT7921K"
+        hwid: "VEN_14C3&DEV_0616"
+        family_name: "MT7921K"
+        queries:
+          - "MT7921K Windows 11"
+        preferred_branches:
+          - "3.5"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+      - prefix: "MT7922"
+        hwid: "VEN_14C3&DEV_0607"
+        family_name: "MT7922"
+        queries:
+          - "MT7922 Windows 11"
+        preferred_branches:
+          - "3.5"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+      - prefix: "MT7925"
+        hwid: "VEN_14C3&DEV_0603"
+        family_name: "MT7925"
+        queries:
+          - "MT7925 Windows 11"
+        preferred_branches:
+          - "25.30"
+          - "5.7"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+      - prefix: "MT7927"
+        hwid: "VEN_14C3&DEV_0604"
+        family_name: "MT7927"
+        queries:
+          - "MT7927 Windows 11"
+        preferred_branches:
+          - "25.30"
+          - "5.7"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+
+  - name: "Broadcom NetXtreme-E"
+    key: "broadcom"
+    devices:
+      - prefix: "NetXtreme-E BCM57416"
+        hwid: "VEN_14E4&DEV_16D8"
+        family_name: "NetXtreme-E"
+        queries:
+          - "BCM57416 RDMA Ethernet"
+        selection_strategy: "semantic_version"
+        exclude_ndis: true

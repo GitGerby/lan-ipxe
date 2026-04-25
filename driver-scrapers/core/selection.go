@@ -12,6 +12,14 @@ import (
 func (o *Orchestrator) selectPackages(searchResults map[string][]*SearchResult) []*DriverPackage {
 	var packages []*DriverPackage
 
+	// Build a lookup from device prefix to strategy (from the provider's device targets)
+	deviceStrategies := make(map[string]SelectionStrategy)
+	deviceExcludeNDIS := make(map[string]bool)
+	for _, dt := range o.provider.Devices() {
+		deviceStrategies[dt.Prefix] = dt.SelectionStrategy
+		deviceExcludeNDIS[dt.Prefix] = dt.ExcludeNDIS
+	}
+
 	for prefix, results := range searchResults {
 		if len(results) == 0 {
 			continue
@@ -23,8 +31,14 @@ func (o *Orchestrator) selectPackages(searchResults map[string][]*SearchResult) 
 			byArch[r.Arch] = append(byArch[r.Arch], r)
 		}
 
+		// Get the strategy for this device (default to NewestByDate if not found)
+		strategy := deviceStrategies[prefix]
+		if strategy == 0 {
+			strategy = NewestByDate
+		}
+
 		for _, archResults := range byArch {
-			pkg := o.selectSingle(prefix, archResults)
+			pkg := o.selectSingle(prefix, archResults, strategy)
 			if pkg != nil {
 				packages = append(packages, pkg)
 			}
@@ -35,12 +49,11 @@ func (o *Orchestrator) selectPackages(searchResults map[string][]*SearchResult) 
 }
 
 // selectSingle selects the best package from a list of search results for a single device+arch.
-func (o *Orchestrator) selectSingle(prefix string, results []*SearchResult) *DriverPackage {
+func (o *Orchestrator) selectSingle(prefix string, results []*SearchResult, strategy SelectionStrategy) *DriverPackage {
 	if len(results) == 0 {
 		return nil
 	}
 
-	strategy := o.provider.SelectionStrategy()
 	best := results[0]
 
 	for i := 1; i < len(results); i++ {
@@ -73,13 +86,19 @@ func (o *Orchestrator) selectSingle(prefix string, results []*SearchResult) *Dri
 
 // isBetter returns true if candidate is better than current based on selection strategy.
 func (o *Orchestrator) isBetter(candidate, current *SearchResult, strategy SelectionStrategy) bool {
+	// Build device strategies map for isBetterByVersionWithBranch
+	deviceStrategies := make(map[string]SelectionStrategy)
+	for _, dt := range o.provider.Devices() {
+		deviceStrategies[dt.Prefix] = dt.SelectionStrategy
+	}
+
 	switch strategy {
 	case NewestByDate:
 		return isBetterByDate(candidate, current)
 	case SemanticVersion:
 		return isBetterByVersion(candidate, current)
 	case SemanticVersionWithBranch:
-		return isBetterByVersionWithBranch(candidate, current, o.provider.Devices())
+		return isBetterByVersionWithBranch(candidate, current, deviceStrategies, o.provider.Devices())
 	default:
 		return isBetterByDate(candidate, current)
 	}
@@ -98,7 +117,7 @@ func isBetterByVersion(candidate, current *SearchResult) bool {
 }
 
 // isBetterByVersionWithBranch returns true if candidate is better considering branch preferences.
-func isBetterByVersionWithBranch(candidate, current *SearchResult, devices []DeviceTarget) bool {
+func isBetterByVersionWithBranch(candidate, current *SearchResult, deviceStrategies map[string]SelectionStrategy, devices []DeviceTarget) bool {
 	// First check if either matches a preferred branch
 	candBranch := extractBranch(candidate.Detail.Version, devices)
 	curBranch := extractBranch(current.Detail.Version, devices)

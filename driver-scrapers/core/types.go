@@ -129,12 +129,16 @@ const (
 )
 
 // DeviceTarget represents a hardware target to search for.
+// SelectionStrategy and ExcludeNDIS are per-device to allow different
+// selection behavior for each device within the same provider.
 type DeviceTarget struct {
 	Prefix            string
 	HWID              string
 	FamilyName        string
 	Queries           []string
 	PreferredBranches []string
+	SelectionStrategy SelectionStrategy
+	ExcludeNDIS       bool
 }
 
 // DriverProvider is the interface that all driver providers must implement.
@@ -144,11 +148,8 @@ type DriverProvider interface {
 	// ProviderKey returns the CLI key for this provider (e.g., "intel-eth").
 	ProviderKey() string
 	// Devices returns the list of hardware targets to search.
+	// Each DeviceTarget carries its own SelectionStrategy and ExcludeNDIS.
 	Devices() []DeviceTarget
-	// SelectionStrategy returns how to pick the best package.
-	SelectionStrategy() SelectionStrategy
-	// ExcludeNDIS returns true if NDIS packages should be excluded.
-	ExcludeNDIS() bool
 }
 
 // ProviderResult holds the results for a single provider run.
@@ -220,7 +221,7 @@ func (o *Orchestrator) Run() *ProviderResult {
 		Status:   "Starting",
 	})
 
-	// Build search devices
+	// Build search devices (with per-device strategy)
 	devices := make([]SearchDevice, 0, len(o.provider.Devices()))
 	for _, dt := range o.provider.Devices() {
 		devices = append(devices, SearchDevice{
@@ -229,15 +230,16 @@ func (o *Orchestrator) Run() *ProviderResult {
 			FamilyName:        dt.FamilyName,
 			Queries:           dt.Queries,
 			PreferredBranches: dt.PreferredBranches,
+			SelectionStrategy: dt.SelectionStrategy,
+			ExcludeNDIS:       dt.ExcludeNDIS,
 		})
 	}
 
-	// Search
+	// Search - use first device's ExcludeNDIS as default, overridden per-device
 	searchCfg := &SearchConfig{
 		ProviderName:   o.provider.Name(),
 		AcceptedArchs:  o.cfg.AcceptedArchs,
 		DetailThrottle: o.cfg.DetailThrottle,
-		ExcludeNDIS:    o.provider.ExcludeNDIS(),
 		Progress:       o.progress,
 	}
 

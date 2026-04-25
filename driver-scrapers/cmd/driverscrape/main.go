@@ -24,7 +24,8 @@ func main() {
 	// Parse flags
 	arch := flag.String("arch", "x64", "Target architecture (x64, arm64, all)")
 	output := flag.String("output", "./drivers", "Download output directory")
-	providersFlag := flag.String("providers", "all", "Comma-separated list of providers to run (intel-eth, intel-wifi, marvell, realtek, qualcomm, mediatek, broadcom)")
+	config := flag.String("config", "./providers.yaml", "Path to providers YAML config file")
+	providersFlag := flag.String("providers", "all", "Comma-separated list of providers to run (or 'all')")
 	noDownload := flag.Bool("no-download", false, "Search only, skip download and extraction")
 	noExtract := flag.Bool("no-extract", false, "Download but skip CAB extraction")
 	noTUI := flag.Bool("no-tui", false, "Plain text output instead of TUI")
@@ -58,8 +59,15 @@ func main() {
 		acceptedArchs = []string{"AMD64", "ARM64"}
 	}
 
+	// Load providers from YAML config
+	cfg, err := providers.LoadProviders(*config)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Parse providers list
-	providerKeys := parseProviders(*providersFlag)
+	providerKeys := parseProviders(*providersFlag, cfg)
 
 	// Convert output to absolute path so all derived paths work correctly
 	if absOutput, err := filepath.Abs(*output); err == nil {
@@ -72,8 +80,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Build provider map
-	allProviders := buildProviderMap()
+	// Build provider map from config
+	allProviders := buildProviderMap(cfg)
 	selectedProviders := make([]core.DriverProvider, 0)
 	for _, key := range providerKeys {
 		p, ok := allProviders[key]
@@ -89,7 +97,7 @@ func main() {
 	progressChan := make(core.ProgressChan, 4096)
 
 	// Create orchestrator config
-	cfg := &core.OrchestratorConfig{
+	cfg2 := &core.OrchestratorConfig{
 		AcceptedArchs:  acceptedArchs,
 		OutputDir:      *output,
 		DetailThrottle: *detailThrottle,
@@ -108,7 +116,7 @@ func main() {
 		prov := p
 		idx := i
 		g.Go(func() error {
-			orch := core.NewOrchestrator(prov, cfg, progressChan)
+			orch := core.NewOrchestrator(prov, cfg2, progressChan)
 			results[idx] = orch.Run()
 			return nil
 		})
@@ -201,9 +209,13 @@ func main() {
 	}
 }
 
-func parseProviders(s string) []string {
+func parseProviders(s string, cfg *providers.Config) []string {
 	if s == "all" {
-		return []string{"intel-eth", "intel-wifi", "marvell", "realtek", "qualcomm", "mediatek", "broadcom"}
+		var keys []string
+		for _, p := range cfg.Providers {
+			keys = append(keys, p.Key)
+		}
+		return keys
 	}
 
 	var result []string
@@ -216,29 +228,13 @@ func parseProviders(s string) []string {
 	return result
 }
 
-func buildProviderMap() map[string]core.DriverProvider {
+func buildProviderMap(cfg *providers.Config) map[string]core.DriverProvider {
 	m := make(map[string]core.DriverProvider)
 
-	intelEth := providers.NewIntelEthernet()
-	m[intelEth.ProviderKey()] = intelEth
-
-	intelWifi := providers.NewIntelWiFi()
-	m[intelWifi.ProviderKey()] = intelWifi
-
-	marvell := providers.NewMarvell()
-	m[marvell.ProviderKey()] = marvell
-
-	realtek := providers.NewRealtek()
-	m[realtek.ProviderKey()] = realtek
-
-	qualcomm := providers.NewQualcomm()
-	m[qualcomm.ProviderKey()] = qualcomm
-
-	mediatek := providers.NewMediaTek()
-	m[mediatek.ProviderKey()] = mediatek
-
-	broadcom := providers.NewBCM()
-	m[broadcom.ProviderKey()] = broadcom
+	for _, p := range cfg.Providers {
+		prov := providers.NewDynamicProvider(p)
+		m[prov.ProviderKey()] = prov
+	}
 
 	return m
 }
