@@ -3,3 +3,4 @@ archiso/
 custom_archiso/
 *.vhdx
 *.iso
+*.exe
