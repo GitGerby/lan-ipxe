@@ -6,8 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strings"
 )
 
 // extractPackage extracts a downloaded CAB file.
@@ -118,59 +116,4 @@ func listFiles(dir string) ([]string, error) {
 		return nil
 	})
 	return files, err
-}
-
-// extractVersionFromTitle extracts a version string from a catalog item title.
-func extractVersionFromTitle(title string) string {
-	// Match version patterns like "12.17.62.0001" or "v12.17.62"
-	re := regexp.MustCompile(`(?:v|V)?(\d+(?:\.\d+){2,4})`)
-	matches := re.FindStringSubmatch(title)
-	if len(matches) >= 2 {
-		return matches[1]
-	}
-	return ""
-}
-
-// extractDateFromTitle extracts a date string from a catalog item title.
-func extractDateFromTitle(title string) string {
-	// Match date patterns like "10/15/2024" or "2024-10-15"
-	re := regexp.MustCompile(`(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})`)
-	matches := re.FindStringSubmatch(title)
-	if len(matches) >= 2 {
-		return matches[1]
-	}
-	return ""
-}
-
-// isDriverPackage checks if a catalog item title looks like a driver package.
-func isDriverPackage(title string) bool {
-	lower := strings.ToLower(title)
-	// Common driver package indicators
-	driverIndicators := []string{
-		"driver", "inf", "sys", "catalog", "wdf",
-		"network", "ethernet", "wifi", "usb", "pci",
-		"intel", "realtek", "marvell", "qualcomm",
-		"atheros", "kaby", "coffee", "comet",
-	}
-	for _, indicator := range driverIndicators {
-		if strings.Contains(lower, indicator) {
-			return true
-		}
-	}
-	return false
-}
-
-// extractArchFromTitle extracts architecture info from a catalog item title.
-func extractArchFromTitle(title string) string {
-	lower := strings.ToLower(title)
-	if strings.Contains(lower, "arm64") || strings.Contains(lower, "arm") {
-		return "ARM64"
-	}
-	if strings.Contains(lower, "amd64") || strings.Contains(lower, "x64") || strings.Contains(lower, "x86_64") {
-		return "AMD64"
-	}
-	if strings.Contains(lower, "x86") || strings.Contains(lower, "32") {
-		return "x86"
-	}
-	return ""
 }

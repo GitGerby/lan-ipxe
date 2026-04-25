@@ -143,3 +143,22 @@ func (p *mediatek) ProviderKey() string                       { return "mediatek
 func (p *mediatek) Devices() []core.DeviceTarget              { return p.devices }
 func (p *mediatek) SelectionStrategy() core.SelectionStrategy { return core.SemanticVersionWithBranch }
 func (p *mediatek) ExcludeNDIS() bool                         { return true }
+
+type broadcom struct {
+	devices []core.DeviceTarget
+}
+
+// NewBCM creates a new Broadcom provider.
+func NewBCM() core.DriverProvider {
+	return &broadcom{
+		devices: []core.DeviceTarget{
+			{Prefix: "NetXtreme-E BCM57416", HWID: "VEN_14E4&DEV_16D8", FamilyName: "NetXtreme-E", Queries: []string{"BCM57416 RDMA Ethernet"}},
+		},
+	}
+}
+
+func (p *broadcom) Name() string                              { return "Broadcom NetXtreme-E" }
+func (p *broadcom) ProviderKey() string                       { return "broadcom" }
+func (p *broadcom) Devices() []core.DeviceTarget              { return p.devices }
+func (p *broadcom) SelectionStrategy() core.SelectionStrategy { return core.SemanticVersion }
+func (p *broadcom) ExcludeNDIS() bool                         { return true }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"time"
 )
 
 // Event type constants
@@ -19,6 +20,7 @@ const (
 	EventDownloadDone
 	EventExtractStart
 	EventExtractDone
+	EventDeviceComplete
 	EventProviderDone
 	EventProviderFailed
 	EventDone
@@ -45,6 +47,8 @@ func (e EventType) String() string {
 		return "EXTRACT_START"
 	case EventExtractDone:
 		return "EXTRACT_DONE"
+	case EventDeviceComplete:
+		return "DEVICE_COMPLETE"
 	case EventProviderDone:
 		return "PROVIDER_DONE"
 	case EventProviderFailed:
@@ -77,6 +81,16 @@ func (pc ProgressChan) Send(ev ProgressEvent) {
 	select {
 	case pc <- ev:
 	default:
+		// Drop event if channel is full to avoid blocking the producer
+	}
+}
+
+// SendBlocking sends a progress event, blocking with a timeout if channel is full.
+func (pc ProgressChan) SendBlocking(ev ProgressEvent) {
+	select {
+	case pc <- ev:
+	case <-time.After(5 * time.Second):
+		// Log warning: channel full, event dropped after timeout
 	}
 }
 
@@ -291,8 +305,9 @@ func (o *Orchestrator) Run() *ProviderResult {
 		}
 
 		result.Success++
+		// Send per-device completion event (not provider-level)
 		o.progress.Send(ProgressEvent{
-			Type:     EventProviderDone,
+			Type:     EventDeviceComplete,
 			Provider: o.provider.Name(),
 			Device:   pkg.DevicePrefix,
 			Arch:     pkg.Arch,

@@ -71,6 +71,34 @@ func NewModel() *Model {
 	}
 }
 
+// statusPriority returns a numeric priority for provider status strings.
+// Higher values mean a more "advanced" state that should not be downgraded.
+func statusPriority(s string) int {
+	switch s {
+	case "Complete":
+		return 5
+	case "Extracting...":
+		return 4
+	case "Downloading...":
+		return 3
+	case "Searching...":
+		return 2
+	case "Starting", "Waiting...":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// advanceStatus returns newStatus if its priority is >= current status priority,
+// otherwise returns the current status (preventing downgrade).
+func advanceStatus(current, newStatus string) string {
+	if statusPriority(newStatus) >= statusPriority(current) {
+		return newStatus
+	}
+	return current
+}
+
 // Init returns the initial TUI message.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, tea.Every(100*time.Millisecond, func(time.Time) tea.Msg {
@@ -101,7 +129,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case core.ProgressEvent:
 		m.handleProgress(msg)
-		return m, nil
+		// Always return spinner.Tick to keep the spinner animating
+		// even when progress events are being processed
+		return m, m.spinner.Tick
 	}
 
 	// On any message, re-render to update spinner/progress
@@ -367,7 +397,7 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 			ds.progress = 0
 			m.downloading++
 			ps.subStatus = fmt.Sprintf("Downloading %s...", ev.Device)
-			ps.status = "Downloading..."
+			ps.status = advanceStatus(ps.status, "Downloading...")
 			ps.activeDeviceKey = key
 		}
 
@@ -383,7 +413,7 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 			ds.progress = 1.0
 			ds.phase = "downloaded" // downloaded but not extracted yet
 			m.downloading--
-			ps.status = fmt.Sprintf("Downloaded %s", ev.Device)
+			ps.status = advanceStatus(ps.status, fmt.Sprintf("Downloaded %s", ev.Device))
 			if ps.activeDeviceKey == key {
 				ps.activeDeviceKey = ""
 			}
@@ -395,7 +425,7 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 			ds.phase = "extracting"
 			m.extracting++
 			ps.subStatus = fmt.Sprintf("Extracting %s...", ev.Device)
-			ps.status = "Extracting..."
+			ps.status = advanceStatus(ps.status, "Extracting...")
 			ps.activeDeviceKey = key
 		}
 
@@ -404,22 +434,27 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 		if ds, ok := ps.devices[key]; ok {
 			ds.phase = "complete"
 			m.extracting--
-			ps.status = fmt.Sprintf("Extracted %s", ev.Device)
+			ps.status = advanceStatus(ps.status, fmt.Sprintf("Extracted %s", ev.Device))
 			if ps.activeDeviceKey == key {
 				ps.activeDeviceKey = ""
 			}
 		}
 
-	case core.EventProviderDone:
-		if ev.Device != "" && ev.Arch != "" {
-			key := deviceKey(ev.Device, ev.Arch)
-			if ds, ok := ps.devices[key]; ok {
-				ds.done = true
-				ds.phase = "complete"
-				m.doneDevices++
-				ps.done++
-			}
+	// EventDeviceComplete: per-device completion (NOT provider-level)
+	// Updates device state without clearing provider status
+	case core.EventDeviceComplete:
+		key := deviceKey(ev.Device, ev.Arch)
+		if ds, ok := ps.devices[key]; ok {
+			ds.done = true
+			ds.phase = "complete"
+			m.doneDevices++
+			ps.done++
 		}
+		// Do NOT clear ps.status or ps.subStatus — the provider is still active
+
+	// EventProviderDone: final provider-level completion
+	// Only fires after ALL devices are done
+	case core.EventProviderDone:
 		ps.status = "Complete"
 		ps.subStatus = ""
 		ps.activeDeviceKey = ""

@@ -22,12 +22,12 @@ func main() {
 	// Parse flags
 	arch := flag.String("arch", "x64", "Target architecture (x64, arm64, all)")
 	output := flag.String("output", "./drivers", "Download output directory")
-	providersFlag := flag.String("providers", "all", "Comma-separated list of providers to run (intel-eth, intel-wifi, marvell, realtek, qualcomm, mediatek)")
+	providersFlag := flag.String("providers", "all", "Comma-separated list of providers to run (intel-eth, intel-wifi, marvell, realtek, qualcomm, mediatek, broadcom)")
 	noDownload := flag.Bool("no-download", false, "Search only, skip download and extraction")
 	noExtract := flag.Bool("no-extract", false, "Download but skip CAB extraction")
 	noTUI := flag.Bool("no-tui", false, "Plain text output instead of TUI")
 	workers := flag.Int("workers", runtime.NumCPU(), "Max concurrent downloads")
-	detailThrottle := flag.Int("detail-throttle", 8, "Max concurrent detail page fetches")
+	detailThrottle := flag.Int("detail-throttle", runtime.NumCPU()*4, "Max concurrent detail page fetches")
 	timeout := flag.Duration("timeout", 5*time.Minute, "Request timeout per operation")
 	verbose := flag.Bool("verbose", false, "Enable debug logging")
 	showVersion := flag.Bool("version", false, "Show version")
@@ -83,8 +83,8 @@ func main() {
 		selectedProviders = append(selectedProviders, p)
 	}
 
-	// Create progress channel
-	progressChan := make(core.ProgressChan, 64)
+	// Create progress channel with large buffer to absorb download progress bursts
+	progressChan := make(core.ProgressChan, 4096)
 
 	// Create orchestrator config
 	cfg := &core.OrchestratorConfig{
@@ -137,14 +137,36 @@ func main() {
 			close(progressChan)
 		}()
 
-		// Send progress events to the TUI in a goroutine.
-		// When the progress channel closes (all providers done), send tea.Quit
-		// so the TUI exits cleanly instead of blocking forever.
+		// Batch drain progress events and forward to the TUI.
+		// Events are accumulated in a batch and flushed every 16ms (~60fps target)
+		// to reduce per-event overhead and keep the TUI responsive.
 		go func() {
-			for ev := range progressChan {
-				p.Send(ev)
+			ticker := time.NewTicker(16 * time.Millisecond)
+			defer ticker.Stop()
+
+			var batch []core.ProgressEvent
+
+			for {
+				select {
+				case ev, ok := <-progressChan:
+					if !ok {
+						// Channel closed — flush remaining events then quit
+						for _, ev := range batch {
+							p.Send(ev)
+						}
+						p.Quit()
+						return
+					}
+					batch = append(batch, ev)
+
+				case <-ticker.C:
+					// Flush batch to Bubble Tea
+					for _, ev := range batch {
+						p.Send(ev)
+					}
+					batch = batch[:0] // reuse slice capacity
+				}
 			}
-			p.Quit()
 		}()
 
 		// Run the TUI — this blocks until the model returns tea.Quit
@@ -185,7 +207,7 @@ func main() {
 
 func parseProviders(s string) []string {
 	if s == "all" {
-		return []string{"intel-eth", "intel-wifi", "marvell", "realtek", "qualcomm", "mediatek"}
+		return []string{"intel-eth", "intel-wifi", "marvell", "realtek", "qualcomm", "mediatek", "broadcom"}
 	}
 
 	var result []string
@@ -218,6 +240,9 @@ func buildProviderMap() map[string]core.DriverProvider {
 
 	mediatek := providers.NewMediaTek()
 	m[mediatek.ProviderKey()] = mediatek
+
+	broadcom := providers.NewBCM()
+	m[broadcom.ProviderKey()] = broadcom
 
 	return m
 }
