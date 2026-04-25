@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -141,7 +142,7 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 				}
 
 				// Check architecture
-				if !contains(cfg.AcceptedArchs, detail.Arch) {
+				if !slices.Contains(cfg.AcceptedArchs, detail.Arch) {
 					return
 				}
 
@@ -178,7 +179,6 @@ func SearchDevices(ctx context.Context, client *CatalogClient, devices []SearchD
 	g, ctx := errgroup.WithContext(ctx)
 
 	for _, dev := range devices {
-		dev := dev
 		g.Go(func() error {
 			devResults, err := SearchDeviceWithContext(ctx, client, dev, cfg)
 			if err != nil {
@@ -192,14 +192,4 @@ func SearchDevices(ctx context.Context, client *CatalogClient, devices []SearchD
 	}
 
 	return results, g.Wait()
-}
-
-// contains checks if a string slice contains a value.
-func contains(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
