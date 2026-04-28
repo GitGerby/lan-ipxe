@@ -137,7 +137,7 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 
 		if cfg.Progress != nil {
 			cfg.Progress.Send(ProgressEvent{
-				Type:     EventDeviceSearchStart,
+				Type:     EventDeviceSearchDone,
 				Provider: cfg.ProviderName,
 				Device:   dev.Prefix,
 				Status:   fmt.Sprintf("Found %d result(s)", len(updateIDs)),
