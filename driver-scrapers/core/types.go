@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -243,10 +244,63 @@ func (o *Orchestrator) Run() *ProviderResult {
 		Progress:       o.progress,
 	}
 
-	searchResults := SearchDevices(o.ctx, o.client, devices, searchCfg)
+	// Pipeline: search all devices concurrently, then select + download each device
+	// as soon as its search completes. This avoids head-of-line blocking where a slow
+	// search for one device delays TUI updates for all other devices.
+	//
+	// Architecture: SearchDevices runs all searches in parallel via errgroup.
+	// We replace it with per-device goroutines that search → select → download sequentially,
+	// while the download phase is throttled by MaxDownloads.
 
-	// Select best package per device+arch
-	packages := o.selectPackages(searchResults)
+	// Channel to collect selected packages (after search + select per device)
+	type deviceResult struct {
+		pkg     *DriverPackage
+		err     error
+		skipped bool
+	}
+
+	packageChan := make(chan deviceResult, len(devices))
+
+	// Launch per-device search+select goroutines (all run concurrently)
+	for _, dev := range devices {
+		dev := dev
+		go func() {
+			// Search
+			searchResults := SearchDeviceWithContext(o.ctx, o.client, dev, searchCfg)
+
+			// Select best package for this device
+			var pkg *DriverPackage
+			if len(searchResults) > 0 {
+				pkg = o.selectSingle(dev.Prefix, searchResults, dev.SelectionStrategy)
+			}
+
+			if pkg == nil {
+				packageChan <- deviceResult{skipped: true}
+				return
+			}
+
+			// Send selection event immediately so TUI shows progress
+			o.progress.Send(ProgressEvent{
+				Type:     EventPackageSelected,
+				Provider: o.provider.Name(),
+				Device:   pkg.DevicePrefix,
+				Arch:     pkg.Arch,
+				Version:  pkg.Version,
+				Status:   fmt.Sprintf("Selected v%s for %s", pkg.Version, pkg.DevicePrefix),
+			})
+
+			packageChan <- deviceResult{pkg: pkg}
+		}()
+	}
+
+	// Collect packages from all search+select goroutines
+	packages := make([]*DriverPackage, 0)
+	for range devices {
+		res := <-packageChan
+		if res.pkg != nil {
+			packages = append(packages, res.pkg)
+		}
+	}
 
 	if len(packages) == 0 {
 		result.Skipped = len(devices)
@@ -259,74 +313,72 @@ func (o *Orchestrator) Run() *ProviderResult {
 	}
 
 	// Download and extract each package in parallel (throttled by MaxDownloads)
-	if len(packages) > 0 {
-		g, ctx := errgroup.WithContext(o.ctx)
-		g.SetLimit(o.cfg.MaxDownloads)
+	g, ctx := errgroup.WithContext(o.ctx)
+	g.SetLimit(o.cfg.MaxDownloads)
 
-		var successCount, failedCount, skippedCount int32
+	var successCount, failedCount, skippedCount int32
 
-		for _, pkg := range packages {
-			pkg := pkg
-			g.Go(func() error {
-				select {
-				case <-ctx.Done():
-					atomic.AddInt32(&skippedCount, 1)
-					return nil // non-fatal cancellation
-				default:
+	for _, pkg := range packages {
+		pkg := pkg
+		g.Go(func() error {
+			select {
+			case <-ctx.Done():
+				atomic.AddInt32(&skippedCount, 1)
+				return nil // non-fatal cancellation
+			default:
+			}
+
+			// Download
+			if !o.cfg.NoDownload {
+				if err := o.downloadPackage(pkg); err != nil {
+					atomic.AddInt32(&failedCount, 1)
+					o.progress.Send(ProgressEvent{
+						Type:     EventProviderFailed,
+						Provider: o.provider.Name(),
+						Device:   pkg.DevicePrefix,
+						Arch:     pkg.Arch,
+						Status:   "Failed",
+						Message:  err.Error(),
+					})
+					return err // fail this package, continue others
 				}
+			}
 
-				// Download
-				if !o.cfg.NoDownload {
-					if err := o.downloadPackage(pkg); err != nil {
-						atomic.AddInt32(&failedCount, 1)
-						o.progress.Send(ProgressEvent{
-							Type:     EventProviderFailed,
-							Provider: o.provider.Name(),
-							Device:   pkg.DevicePrefix,
-							Arch:     pkg.Arch,
-							Status:   "Failed",
-							Message:  err.Error(),
-						})
-						return err // fail this package, continue others
-					}
+			// Extract
+			if !o.cfg.NoExtract {
+				if err := o.extractPackage(pkg); err != nil {
+					atomic.AddInt32(&failedCount, 1)
+					o.progress.Send(ProgressEvent{
+						Type:     EventProviderFailed,
+						Provider: o.provider.Name(),
+						Device:   pkg.DevicePrefix,
+						Arch:     pkg.Arch,
+						Status:   "Extract failed",
+						Message:  err.Error(),
+					})
+					return err // fail this package, continue others
 				}
+			}
 
-				// Extract
-				if !o.cfg.NoExtract {
-					if err := o.extractPackage(pkg); err != nil {
-						atomic.AddInt32(&failedCount, 1)
-						o.progress.Send(ProgressEvent{
-							Type:     EventProviderFailed,
-							Provider: o.provider.Name(),
-							Device:   pkg.DevicePrefix,
-							Arch:     pkg.Arch,
-							Status:   "Extract failed",
-							Message:  err.Error(),
-						})
-						return err // fail this package, continue others
-					}
-				}
-
-				atomic.AddInt32(&successCount, 1)
-				// Send per-device completion event (not provider-level)
-				o.progress.Send(ProgressEvent{
-					Type:     EventDeviceComplete,
-					Provider: o.provider.Name(),
-					Device:   pkg.DevicePrefix,
-					Arch:     pkg.Arch,
-					Version:  pkg.Version,
-					Status:   "Complete",
-					Progress: 1.0,
-				})
-				return nil
+			atomic.AddInt32(&successCount, 1)
+			// Send per-device completion event (not provider-level)
+			o.progress.Send(ProgressEvent{
+				Type:     EventDeviceComplete,
+				Provider: o.provider.Name(),
+				Device:   pkg.DevicePrefix,
+				Arch:     pkg.Arch,
+				Version:  pkg.Version,
+				Status:   "Complete",
+				Progress: 1.0,
 			})
-		}
-
-		g.Wait()
-		result.Success = int(atomic.LoadInt32(&successCount))
-		result.Failed = int(atomic.LoadInt32(&failedCount))
-		result.Skipped = int(atomic.LoadInt32(&skippedCount))
+			return nil
+		})
 	}
+
+	g.Wait()
+	result.Success = int(atomic.LoadInt32(&successCount))
+	result.Failed = int(atomic.LoadInt32(&failedCount))
+	result.Skipped = int(atomic.LoadInt32(&skippedCount))
 
 	o.progress.Send(ProgressEvent{
 		Type:     EventProviderDone,

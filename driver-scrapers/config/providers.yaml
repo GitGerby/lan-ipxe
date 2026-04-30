@@ -93,13 +93,14 @@ providers:
   - name: "Realtek Ethernet"
     key: "realtek"
     devices:
+      # PCIe Family
       - prefix: "RTL8125"
         hwid: "VEN_10EC&DEV_8125"
         family_name: "RTL8125"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "RTL8126"
-        hwid: "VEN_10EC&DEV_9200"
+        hwid: "VEN_10EC&DEV_8126"
         family_name: "RTL8126"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
@@ -113,23 +114,24 @@ providers:
         family_name: "RTL8168"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
+      # USB Family (uses VID_0BDA&PID_ format)
       - prefix: "RTL8153"
-        hwid: "VEN_10EC&DEV_8153"
+        hwid: "VID_0BDA&PID_8153"
         family_name: "RTL8153"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "RTL8156"
-        hwid: "VEN_10EC&DEV_8156"
+        hwid: "VID_0BDA&PID_8156"
         family_name: "RTL8156"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "RTL8157"
-        hwid: "VEN_10EC&DEV_8157"
+        hwid: "VID_0BDA&PID_8157"
         family_name: "RTL8157"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "RTL8159"
-        hwid: "VEN_10EC&DEV_8159"
+        hwid: "VID_0BDA&PID_815A"
         family_name: "RTL8159"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
@@ -172,47 +174,53 @@ providers:
     key: "mediatek"
     devices:
       - prefix: "MT7921_Filogic330"
-        hwid: "VEN_14C3&DEV_0616"
+        hwid: "VEN_14C3&DEV_7961"
         family_name: "MT7921_Filogic330"
         queries:
-          - "MT7921 Windows 11"
+          - "VEN_14C3&DEV_7961"
+          - "MT7921"
         preferred_branches:
           - "3.5"
         selection_strategy: "semantic_version_with_branch"
         exclude_ndis: true
-      - prefix: "MT7921K"
+      - prefix: "MT7921K_RZ608"
+        hwid: "VEN_14C3&DEV_0608"
+        family_name: "MT7921K_RZ608"
+        queries:
+          - "VEN_14C3&DEV_0608"
+          - "RZ608"
+        preferred_branches:
+          - "3.5"
+        selection_strategy: "semantic_version_with_branch"
+        exclude_ndis: true
+      - prefix: "MT7922_RZ616"
         hwid: "VEN_14C3&DEV_0616"
-        family_name: "MT7921K"
+        family_name: "MT7922_RZ616"
         queries:
-          - "MT7921K Windows 11"
+          - "VEN_14C3&DEV_0616"
+          - "MT7922"
+          - "RZ616"
         preferred_branches:
           - "3.5"
         selection_strategy: "semantic_version_with_branch"
         exclude_ndis: true
-      - prefix: "MT7922"
-        hwid: "VEN_14C3&DEV_0607"
-        family_name: "MT7922"
+      - prefix: "MT7925_Filogic380"
+        hwid: "VEN_14C3&DEV_7925"
+        family_name: "MT7925_Filogic380"
         queries:
-          - "MT7922 Windows 11"
-        preferred_branches:
-          - "3.5"
-        selection_strategy: "semantic_version_with_branch"
-        exclude_ndis: true
-      - prefix: "MT7925"
-        hwid: "VEN_14C3&DEV_0603"
-        family_name: "MT7925"
-        queries:
-          - "MT7925 Windows 11"
+          - "VEN_14C3&DEV_7925"
+          - "MT7925"
         preferred_branches:
           - "25.30"
           - "5.7"
         selection_strategy: "semantic_version_with_branch"
         exclude_ndis: true
-      - prefix: "MT7927"
-        hwid: "VEN_14C3&DEV_0604"
-        family_name: "MT7927"
+      - prefix: "MT7927_Filogic380High"
+        hwid: "VEN_14C3&DEV_7927"
+        family_name: "MT7927_Filogic380High"
         queries:
-          - "MT7927 Windows 11"
+          - "VEN_14C3&DEV_7927"
+          - "MT7927"
         preferred_branches:
           - "25.30"
           - "5.7"

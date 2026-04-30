@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -299,15 +300,28 @@ func (m *Model) renderProviders(availableWidth int) string {
 			}
 		}
 
-		// Device lines - show all devices with results or active status
-		for _, ds := range ps.devices {
-			// Show devices that are done, failed, have results, or are active
+		// Device lines - show all devices with results or active status.
+		// Collect visible devices first, then sort stably by prefix to prevent
+		// the list from jumping around on each re-render (map iteration is random).
+		type visibleDevice struct {
+			key   string
+			state *deviceState
+		}
+		var visible []visibleDevice
+		for key, ds := range ps.devices {
 			if ds.done || ds.failed || ds.version != "" || ds.phase == "downloading" || ds.phase == "extracting" || ds.phase == "selected" || ds.phase == "found" {
-				isActive := ps.activeDeviceKey == ds.prefix
-				line := m.renderDeviceLine(ds, isActive, deviceBarWidth)
-				b.WriteString(line)
-				b.WriteString("\n")
+				visible = append(visible, visibleDevice{key: key, state: ds})
 			}
+		}
+		sort.SliceStable(visible, func(i, j int) bool {
+			return visible[i].key < visible[j].key
+		})
+		for _, vd := range visible {
+			ds := vd.state
+			isActive := ps.activeDeviceKey == vd.key
+			line := m.renderDeviceLine(ds, isActive, deviceBarWidth)
+			b.WriteString(line)
+			b.WriteString("\n")
 		}
 
 		b.WriteString("\n")
