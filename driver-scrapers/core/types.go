@@ -15,7 +15,8 @@ import (
 type EventType int
 
 const (
-	EventProviderStart EventType = iota
+	EventInit EventType = iota // Sent once at startup with full provider/device tree
+	EventProviderStart
 	EventDeviceSearchStart
 	EventDeviceSearchDone
 	EventPackageSelected
@@ -33,6 +34,8 @@ const (
 // String returns a human-readable string for the event type.
 func (e EventType) String() string {
 	switch e {
+	case EventInit:
+		return "INIT"
 	case EventProviderStart:
 		return "PROVIDER_START"
 	case EventDeviceSearchStart:
@@ -64,17 +67,25 @@ func (e EventType) String() string {
 	}
 }
 
+// ProviderInfo describes a provider and its devices for TUI initialization.
+type ProviderInfo struct {
+	Name    string   // display name
+	Devices []string // device prefixes
+}
+
 // ProgressEvent is sent via the progress channel to report status updates.
 type ProgressEvent struct {
-	Type     EventType
-	Provider string  // provider name (e.g., "Intel Ethernet")
-	Device   string  // device prefix or model name
-	Arch     string  // "AMD64" or "ARM64"
-	Version  string  // selected package version
-	Progress float64 // 0.0 - 1.0
-	Status   string  // human-readable status
-	Message  string  // additional details (filename, error, etc.)
-	Err      error   // non-nil if EventProviderFailed
+	// Used for EventInit to carry the full provider/device tree
+	Providers []ProviderInfo
+	Type      EventType
+	Provider  string  // provider name (e.g., "Intel Ethernet")
+	Device    string  // device prefix or model name
+	Arch      string  // "AMD64" or "ARM64"
+	Version   string  // selected package version
+	Progress  float64 // 0.0 - 1.0
+	Status    string  // human-readable status
+	Message   string  // additional details (filename, error, etc.)
+	Err       error   // non-nil if EventProviderFailed
 }
 
 // ProgressChan is a channel for ProgressEvent values.
@@ -295,10 +306,13 @@ func (o *Orchestrator) Run() *ProviderResult {
 
 	// Collect packages from all search+select goroutines
 	packages := make([]*DriverPackage, 0)
+	var searchSkippedCount int32
 	for range devices {
 		res := <-packageChan
 		if res.pkg != nil {
 			packages = append(packages, res.pkg)
+		} else if res.skipped {
+			atomic.AddInt32(&searchSkippedCount, 1)
 		}
 	}
 
@@ -311,6 +325,10 @@ func (o *Orchestrator) Run() *ProviderResult {
 		})
 		return result
 	}
+
+	// Wait for all search+select goroutines to finish before proceeding.
+	// The packageChan collection loop above already drains all results,
+	// so all goroutines are guaranteed to be done by this point.
 
 	// Download and extract each package in parallel (throttled by MaxDownloads)
 	g, ctx := errgroup.WithContext(o.ctx)
@@ -378,7 +396,7 @@ func (o *Orchestrator) Run() *ProviderResult {
 	g.Wait()
 	result.Success = int(atomic.LoadInt32(&successCount))
 	result.Failed = int(atomic.LoadInt32(&failedCount))
-	result.Skipped = int(atomic.LoadInt32(&skippedCount))
+	result.Skipped = int(atomic.LoadInt32(&skippedCount)) + int(atomic.LoadInt32(&searchSkippedCount))
 
 	o.progress.Send(ProgressEvent{
 		Type:     EventProviderDone,

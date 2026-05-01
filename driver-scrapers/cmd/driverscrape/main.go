@@ -132,7 +132,22 @@ func main() {
 	} else {
 		// TUI mode: providers run in background, TUI runs on main goroutine
 		// Bubble Tea MUST run on the main goroutine because it takes over stdin/stdout
-		model := tui.NewModel()
+
+		// Build provider info for TUI initialization (pre-populate all devices)
+		var providerInfos []core.ProviderInfo
+		for _, prov := range selectedProviders {
+			var devices []string
+			for _, dt := range prov.Devices() {
+				devices = append(devices, dt.Prefix)
+			}
+			providerInfos = append(providerInfos, core.ProviderInfo{
+				Name:    prov.Name(),
+				Devices: devices,
+			})
+		}
+
+		// Pass provider info directly to model so devices are rendered before p.Run()
+		model := tui.NewModel(providerInfos)
 		p := tea.NewProgram(model)
 
 		// Start providers in a background goroutine

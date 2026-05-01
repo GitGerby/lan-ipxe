@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,14 +12,22 @@ import (
 	"github.com/gitgerby/lan-ipxe/driver-scrapers/core"
 )
 
+// Column widths for the fixed table layout.
+// Total: 18 + 8 + 12 + 14 + 30 = 82ch (fits standard 80ch terminal with padding)
+const (
+	colDevice   = 18
+	colArch     = 8
+	colVersion  = 12
+	colStatus   = 14
+	colProgress = 30
+)
+
 // Model is the Bubble Tea TUI model for displaying driver scrape progress.
 type Model struct {
 	width  int
 	height int
-	// Provider insertion order (preserves first-seen order)
-	providerOrder []string
-	// Per-provider state
-	providerStates map[string]*providerState
+	// Providers in order, each with pre-populated devices
+	providers []*providerState
 	// Overall state
 	totalDevices int
 	doneDevices  int
@@ -29,22 +36,15 @@ type Model struct {
 	// Spinner
 	spinner  spinner.Model
 	quitting bool
+	// Whether EventInit has been received
+	initialized bool
 }
 
 type providerState struct {
 	name    string
-	devices map[string]*deviceState
-	total   int
+	devices []*deviceState // pre-populated, stable order
 	done    int
 	failed  int
-	// Phase tracking
-	searching int // devices still searching
-	ready     int // devices ready for download (found packages)
-	status    string
-	// subStatus shows the currently active device operation (e.g., "Searching I225-V...")
-	subStatus string
-	// Currently active device key for this provider (shows spinner)
-	activeDeviceKey string
 }
 
 type deviceState struct {
@@ -54,57 +54,32 @@ type deviceState struct {
 	progress float64
 	done     bool
 	failed   bool
-	phase    string // "searching", "selected", "downloading", "extracting", "complete", "failed"
+	phase    string // "waiting", "searching", "selected", "downloading", "extracting", "complete", "failed"
 }
 
-// Layout constants - computed dynamically based on terminal width.
-// Minimum terminal dimensions the TUI can function in.
+// Minimum terminal dimensions.
 const (
-	minWidth  = 40
+	minWidth  = 80
 	minHeight = 10
 )
 
-// NewModel creates a new TUI model.
-func NewModel() *Model {
+// NewModel creates a new TUI model with pre-populated providers.
+func NewModel(providerInfos []core.ProviderInfo) *Model {
 	s := spinner.New()
-	s.Spinner = spinner.Line
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("135"))
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colorAmber))
 
-	return &Model{
-		width:          minWidth,
-		height:         minHeight,
-		providerOrder:  make([]string, 0),
-		providerStates: make(map[string]*providerState),
-		spinner:        s,
+	m := &Model{
+		width:     minWidth,
+		height:    minHeight,
+		providers: make([]*providerState, 0),
+		spinner:   s,
 	}
-}
 
-// statusPriority returns a numeric priority for provider status strings.
-// Higher values mean a more "advanced" state that should not be downgraded.
-func statusPriority(s string) int {
-	switch s {
-	case "Complete":
-		return 5
-	case "Extracting...":
-		return 4
-	case "Downloading...":
-		return 3
-	case "Searching...":
-		return 2
-	case "Starting", "Waiting...":
-		return 1
-	default:
-		return 0
-	}
-}
+	// Pre-populate all providers and devices immediately
+	m.initializeProviders(providerInfos)
 
-// advanceStatus returns newStatus if its priority is >= current status priority,
-// otherwise returns the current status (preventing downgrade).
-func advanceStatus(current, newStatus string) string {
-	if statusPriority(newStatus) >= statusPriority(current) {
-		return newStatus
-	}
-	return current
+	return m
 }
 
 // Update handles TUI messages.
@@ -133,23 +108,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case timeMsg:
-		// Periodic tick — trigger re-render for smooth spinner animation
 		return m, nil
 	}
 
-	// Trigger re-render on any unhandled message
 	return m, nil
 }
 
-// tickCmd is a lightweight periodic command that triggers re-renders
-// so the spinner animates smoothly even between progress events.
+// tickCmd is a lightweight periodic command that triggers re-renders.
 func tickCmd(t time.Time) tea.Msg {
 	return timeMsg(t)
 }
 
 type timeMsg time.Time
 
-// Init returns the initial TUI commands: spinner tick + periodic re-render timer.
+// Init returns the initial TUI commands.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
@@ -163,78 +135,57 @@ func (m *Model) View() string {
 		return ""
 	}
 
-	// Calculate dynamic widths based on terminal size.
-	// Reserve space for:
-	//   - header (1 line)
-	//   - separator (1 line)
-	//   - blank line (1 line)
-	//   - overall progress (2 lines)
-	//   - blank line (1 line)
-	//   - footer (1 line)
-	// = 7 fixed lines
-	// Remaining lines are for provider blocks.
-	availableWidth := m.width
-	if availableWidth < minWidth {
-		availableWidth = minWidth
+	availWidth := m.width
+	if availWidth < minWidth {
+		availWidth = minWidth
 	}
-	availableHeight := m.height
-	if availableHeight < minHeight {
-		availableHeight = minHeight
+	availHeight := m.height
+	if availHeight < minHeight {
+		availHeight = minHeight
 	}
 
 	var b strings.Builder
-	// Pre-allocate a reasonable capacity
-	b.Grow(m.width * m.height)
+	b.Grow(availWidth * availHeight)
 
-	// Header
-	b.WriteString(headerStyle.Render("=== LAN-iPXE Driver Scraper ==="))
+	// Header line
+	b.WriteString(m.renderHeader(availWidth))
 	b.WriteString("\n")
 
 	// Separator
-	sepWidth := availableWidth - 2 // account for separator padding
-	if sepWidth < 20 {
-		sepWidth = 20
-	}
-	b.WriteString(separatorStyle.Render(strings.Repeat("─", sepWidth)))
+	b.WriteString(m.renderSeparator(availWidth))
 	b.WriteString("\n")
 
-	// Provider list - render into a separate buffer first so we can
-	// measure and truncate if needed.
-	providerContent := m.renderProviders(availableWidth)
+	// Provider sections rendered into buffer for truncation
+	providerContent := m.renderProviders(availWidth)
 
-	// Count lines in provider content to decide if we need to truncate.
-	// Fixed lines: header(1) + sep(1) + overall(2) + footer(2) = 6
-	fixedLines := 6
-	maxProviderLines := availableHeight - fixedLines
+	// Calculate available lines for provider content.
+	// Fixed: header(1) + sep(1) + overallSep(1) + overall(1) + footer(1) = 5
+	fixedLines := 5
+	maxProviderLines := availHeight - fixedLines
 	if maxProviderLines < 1 {
 		maxProviderLines = 1
 	}
 
-	// Truncate provider content if it exceeds available height.
-	if strings.Count(providerContent, "\n") > maxProviderLines {
+	// Truncate if needed
+	lines := strings.Count(providerContent, "\n")
+	if lines > maxProviderLines {
 		providerContent = truncateToLines(providerContent, maxProviderLines)
 	}
 
 	b.WriteString(providerContent)
 
-	// Overall progress
-	b.WriteString(m.renderOverall(availableWidth))
+	// Bottom separator + overall
+	b.WriteString(m.renderSeparator(availWidth))
+	b.WriteString("\n")
+	b.WriteString(m.renderOverall(availWidth))
 
-	// Fill remaining space to keep the layout stable.
-	contentHeight := 1 + 1 + 1 + // header + sep + newline
-		strings.Count(providerContent, "\n") + 1 +
-		2 + // overall
-		1 // newline before footer
-	paddingLines := availableHeight - contentHeight
-	if paddingLines < 0 {
-		paddingLines = 0
+	// Footer padding
+	contentLines := 1 + 1 + strings.Count(providerContent, "\n") + 1 + 1
+	padding := availHeight - contentLines
+	if padding < 1 {
+		padding = 1
 	}
-	if paddingLines > 3 {
-		paddingLines = 3
-	}
-
-	// Footer with spinner
-	for i := 0; i < paddingLines; i++ {
+	for i := 0; i < padding; i++ {
 		b.WriteString("\n")
 	}
 	b.WriteString(fmt.Sprintf(" %s Press q to quit", m.spinner.View()))
@@ -242,88 +193,44 @@ func (m *Model) View() string {
 	return b.String()
 }
 
-// truncateToLines truncates s to at most n lines, cutting at newline boundaries.
-// Returns the first n lines of s (including their trailing newlines).
-func truncateToLines(s string, n int) string {
-	cut := 0
-	for i := 0; i < n; i++ {
-		idx := strings.IndexRune(s[cut:], '\n')
-		if idx == -1 {
-			// Fewer than n lines remain — return everything.
-			return s
-		}
-		cut += idx + 1
-	}
-	// Return everything up to the nth newline (inclusive).
-	return s[:cut]
+func (m *Model) renderHeader(width int) string {
+	title := "LAN-iPXE DRIVER SCRAPER"
+	now := time.Now()
+	timestamp := fmt.Sprintf("%02d/%02d %02d:%02d", now.Month(), now.Day(), now.Hour(), now.Minute())
+
+	rightPad := max(width-len(title)-len(timestamp)-2, 1)
+
+	return headerStyle.Render(title + strings.Repeat(" ", rightPad) + timestamp)
 }
 
-func (m *Model) renderProviders(availableWidth int) string {
+func (m *Model) renderSeparator(width int) string {
+	runes := max(width-1, 20)
+	return separatorStyle.Render(strings.Repeat("─", runes))
+}
+
+func (m *Model) renderProviders(width int) string {
 	var b strings.Builder
 
-	// Device bar width: reserve space for prefix + arch + status + padding
-	// Format: "  [PREFIX][ARCH]BBBBBBBBBBBBBB v1.2.3 ✓"
-	// Prefix ~8, arch ~5, brackets 4, version ~10, status ~3, spaces ~6 = ~36
-	// Provider bar width: reserve space for prefix + padding
-	// Format: "     BBBBBBBBBBBBBBBBBBBB"
-	// prefix ~6, so bar gets the rest
-	deviceBarWidth := clamp(availableWidth-42, 10, 30)
-	providerBarWidth := clamp(availableWidth-12, 15, 40)
-
-	for _, name := range m.providerOrder {
-		ps := m.providerStates[name]
-		if ps == nil {
-			continue
-		}
-
-		// Provider header with phase status
-		b.WriteString(m.renderProviderHeader(ps))
-		b.WriteString("\n")
-
-		// Sub-status line (shows active device operation for this provider)
-		if ps.subStatus != "" {
-			b.WriteString(fmt.Sprintf("     %s\n", statusStyle.Render(ps.subStatus)))
-		}
-
-		// Per-provider progress bar + counts
-		if ps.total > 0 {
-			fraction := m.providerFraction(ps)
-			bar := progressBar(fraction, providerBarWidth)
-			b.WriteString(fmt.Sprintf("     %s\n", progressBarStyle.Render(bar)))
-
-			// Count line - only show when there's meaningful data
-			if ps.ready > 0 || ps.done > 0 || ps.failed > 0 {
-				b.WriteString(fmt.Sprintf("     %d found, %d done, %d failed\n",
-					ps.ready, ps.done, ps.failed))
-			} else if ps.searching > 0 {
-				b.WriteString(fmt.Sprintf("     Searching %d device(s)...\n", ps.searching))
-			}
-		}
-
-		// Device lines - show all devices with results or active status.
-		// Collect visible devices first, then sort stably by prefix to prevent
-		// the list from jumping around on each re-render (map iteration is random).
-		type visibleDevice struct {
-			key   string
-			state *deviceState
-		}
-		var visible []visibleDevice
-		for key, ds := range ps.devices {
-			if ds.done || ds.failed || ds.version != "" || ds.phase == "downloading" || ds.phase == "extracting" || ds.phase == "selected" || ds.phase == "found" {
-				visible = append(visible, visibleDevice{key: key, state: ds})
-			}
-		}
-		sort.SliceStable(visible, func(i, j int) bool {
-			return visible[i].key < visible[j].key
-		})
-		for _, vd := range visible {
-			ds := vd.state
-			isActive := ps.activeDeviceKey == vd.key
-			line := m.renderDeviceLine(ds, isActive, deviceBarWidth)
-			b.WriteString(line)
+	for i, ps := range m.providers {
+		if i > 0 {
 			b.WriteString("\n")
 		}
+		b.WriteString(m.renderProviderSection(ps))
+	}
 
+	return b.String()
+}
+
+func (m *Model) renderProviderSection(ps *providerState) string {
+	var b strings.Builder
+
+	// Provider header line
+	b.WriteString(m.renderProviderHeader(ps))
+	b.WriteString("\n")
+
+	// Device rows (all devices, always visible)
+	for _, ds := range ps.devices {
+		b.WriteString(m.renderDeviceRow(ds))
 		b.WriteString("\n")
 	}
 
@@ -331,239 +238,317 @@ func (m *Model) renderProviders(availableWidth int) string {
 }
 
 func (m *Model) renderProviderHeader(ps *providerState) string {
-	// Phase status
-	phaseStatus := ps.status
-	if phaseStatus == "" {
-		phaseStatus = "Waiting..."
+	// Count active phases
+	downloading := 0
+	extracting := 0
+	for _, ds := range ps.devices {
+		switch ds.phase {
+		case "downloading":
+			downloading++
+		case "extracting":
+			extracting++
+		}
 	}
 
-	// If there's a sub-status, show it with the spinner
-	if ps.subStatus != "" {
-		return fmt.Sprintf(" %s  %s %s",
-			providerStyle.Render(ps.name),
-			m.spinner.View(),
-			statusStyle.Render(ps.subStatus))
+	// Build summary
+	var summaryParts []string
+	summaryParts = append(summaryParts, fmt.Sprintf("%d/%d DONE", ps.done, len(ps.devices)))
+	if downloading > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d DOWNLOADING", downloading))
+	}
+	if extracting > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d EXTRACTING", extracting))
 	}
 
-	// Otherwise just show the phase status
-	return fmt.Sprintf(" %s (%s)",
-		providerStyle.Render(ps.name), statusStyle.Render(phaseStatus))
+	summary := strings.Join(summaryParts, "  ")
+	header := strings.ToUpper(ps.name) + "  " + summary
+
+	return providerStyle.Render(header)
 }
 
-func (m *Model) providerFraction(ps *providerState) float64 {
-	if ps.total == 0 {
-		return 0
-	}
-	// Fraction is based on completed devices
-	return float64(ps.done) / float64(ps.total)
-}
+func (m *Model) renderDeviceRow(ds *deviceState) string {
+	// Device prefix (left-aligned, truncated)
+	deviceStr := padRight(ds.prefix, colDevice)
 
-func (m *Model) renderDeviceLine(ds *deviceState, active bool, barWidth int) string {
-	// Progress bar
-	var bar string
-	if ds.done {
-		bar = doneBar(barWidth)
-	} else if ds.failed {
-		bar = failBar(barWidth)
-	} else if ds.phase == "downloading" || ds.phase == "extracting" {
-		bar = progressBar(ds.progress, barWidth)
-	} else {
-		bar = idleBar(barWidth)
-	}
+	// Arch tag (centered)
+	archStr := m.renderArch(ds.arch)
 
-	// Status symbol
-	var status string
-	if ds.done {
-		status = doneStyle.Render(charDone)
-	} else if ds.failed {
-		status = failStyle.Render(charFail)
-	} else if active && (ds.phase == "downloading" || ds.phase == "extracting") {
-		status = m.spinner.View()
-	} else if ds.phase == "selected" || ds.phase == "complete" {
-		status = statusStyle.Render(charActive)
-	} else {
-		status = statusStyle.Render(charIdle)
-	}
-
-	// Version
-	version := ""
+	// Version (left-aligned)
+	var versionStr string
 	if ds.version != "" {
-		version = versionStyle.Render(" v" + ds.version)
+		versionStr = padRight("v"+ds.version, colVersion)
+	} else {
+		versionStr = strings.Repeat(" ", colVersion)
 	}
 
-	// Phase label (only for active devices being processed)
-	var phaseLabel string
-	if active && ds.phase != "" {
-		phaseLabel = " " + ds.phase
-	}
+	// Status column: symbol + phase text
+	statusStr := m.renderStatus(ds)
 
-	return deviceStyle.Render(fmt.Sprintf("  %s[%s]%s%s %s%s",
-		ds.prefix, ds.arch, bar, version, status, phaseLabel))
+	// Progress bar (fixed width)
+	barStr := m.renderProgressBar(ds)
+
+	return "  " + deviceStr + " " + archStr + " " + versionStr + " " + statusStr + " " + barStr
 }
 
-func (m *Model) renderOverall(availableWidth int) string {
-	// Overall progress bar
-	overallFraction := 0.0
-	if m.totalDevices > 0 {
-		overallFraction = float64(m.doneDevices) / float64(m.totalDevices)
+func (m *Model) renderArch(arch string) string {
+	if arch == "" {
+		return lipgloss.NewStyle().Width(colArch).Align(lipgloss.Center).
+			Foreground(lipgloss.Color(colorDimGray)).Render("—")
+	}
+	tag := "[" + arch + "]"
+	return archStyle.Render(padCenter(tag, colArch))
+}
+
+func (m *Model) renderStatus(ds *deviceState) string {
+	var symbol string
+	var phaseText string
+
+	switch {
+	case ds.done:
+		symbol = doneStyle.Render(charDone)
+		phaseText = ""
+	case ds.failed:
+		symbol = failStyle.Render(charFail)
+		phaseText = ""
+	case ds.phase == "searching":
+		symbol = activeStyle.Render(m.spinner.View())
+		phaseText = statusTextStyle.Render("searching")
+	case ds.phase == "selected":
+		symbol = readyStyle.Render(charActive)
+		phaseText = ""
+	case ds.phase == "downloading":
+		symbol = activeStyle.Render(m.spinner.View())
+		phaseText = statusTextStyle.Render("downloading")
+	case ds.phase == "extracting":
+		symbol = activeStyle.Render(m.spinner.View())
+		phaseText = statusTextStyle.Render("extracting")
+	default:
+		symbol = waitStyle.Render(charIdle)
+		phaseText = ""
 	}
 
-	barWidth := clamp(availableWidth-12, 15, 50)
-	bar := progressBar(overallFraction, barWidth)
+	var statusStr string
+	if phaseText != "" {
+		statusStr = symbol + " " + phaseText
+	} else {
+		statusStr = symbol
+	}
 
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf(" %s\n", progressBarStyle.Render(bar)))
+	return padRight(statusStr, colStatus)
+}
 
-	// Text summary
-	text := fmt.Sprintf("Overall: %d/%d devices complete", m.doneDevices, m.totalDevices)
+func (m *Model) renderProgressBar(ds *deviceState) string {
+	switch {
+	case ds.done:
+		return doneBar(colProgress)
+	case ds.failed:
+		return failBar(colProgress)
+	case ds.phase == "downloading" || ds.phase == "extracting":
+		return progressBar(ds.progress, colProgress)
+	default:
+		return emptyBar(colProgress)
+	}
+}
+
+func (m *Model) renderOverall(width int) string {
+	fraction := 0.0
+	if m.totalDevices > 0 {
+		fraction = float64(m.doneDevices) / float64(m.totalDevices)
+	}
+
+	bar := progressBar(fraction, colProgress)
+
+	text := fmt.Sprintf(" %d/%d COMPLETE", m.doneDevices, m.totalDevices)
 	if m.downloading > 0 {
-		text += fmt.Sprintf("    Downloading: %d", m.downloading)
+		text += fmt.Sprintf("  %d DOWNLOADING", m.downloading)
 	}
 	if m.extracting > 0 {
-		text += fmt.Sprintf("    Extracting: %d", m.extracting)
+		text += fmt.Sprintf("  %d EXTRACTING", m.extracting)
 	}
 
-	b.WriteString("\n" + overallStyle.Render(text))
-
-	return b.String()
+	return overallStyle.Render(text + "  " + bar)
 }
 
+// handleProgress processes a progress event.
 func (m *Model) handleProgress(ev core.ProgressEvent) {
-	ps, exists := m.providerStates[ev.Provider]
-	if !exists {
-		m.providerOrder = append(m.providerOrder, ev.Provider)
-		m.providerStates[ev.Provider] = &providerState{
-			name:    ev.Provider,
-			devices: make(map[string]*deviceState),
-		}
-		ps = m.providerStates[ev.Provider]
+	// Handle initialization event
+	if ev.Type == core.EventInit {
+		m.initializeProviders(ev.Providers)
+		return
 	}
+
+	// Find provider
+	ps := m.findProvider(ev.Provider)
+	if ps == nil {
+		return
+	}
+
+	// Find device within provider
+	ds := m.findDevice(ps, ev.Device)
 
 	switch ev.Type {
 	case core.EventProviderStart:
-		ps.status = "Searching..."
-		ps.subStatus = ""
-		ps.searching = 0
+		// Set all devices to searching phase (first device) or keep waiting
+		for _, d := range ps.devices {
+			if d.phase == "waiting" {
+				// Will be set to searching when EventDeviceSearchStart fires
+				break
+			}
+		}
 
 	case core.EventDeviceSearchStart:
-		// Search events have no Arch — use device name only as key.
-		key := ev.Device
-		ds, ok := ps.devices[key]
-		if !ok {
-			ds = &deviceState{prefix: ev.Device, arch: "x64", phase: "searching"}
-			ps.devices[key] = ds
-			ps.total++
-			ps.searching++
-			m.totalDevices++
-		}
-		// Update sub-status to show which device is being searched
-		if strings.HasPrefix(ev.Status, "Searching") {
-			ps.subStatus = ev.Status
-			ps.activeDeviceKey = key
+		if ds != nil {
+			ds.phase = "searching"
 		}
 
 	case core.EventDeviceSearchDone:
-		// Search done events also have no Arch — look up by device name only.
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
-			ps.searching--
+		if ds != nil {
 			if strings.HasPrefix(ev.Status, "Found") {
 				ds.phase = "found"
-				ps.status = fmt.Sprintf("Found packages for %s", ev.Device)
 			} else if ds.phase == "searching" {
 				ds.phase = "failed"
 				ds.failed = true
 				ps.failed++
 			}
-			if ps.activeDeviceKey == key {
-				ps.activeDeviceKey = ""
-			}
 		}
 
 	case core.EventPackageSelected:
-		// Selection events have Arch. Look up by device name (the key used during search),
-		// then update the arch field now that we know it.
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
+		if ds != nil {
 			ds.arch = ev.Arch
 			ds.version = ev.Version
 			ds.phase = "selected"
-			ps.ready++
-			ps.status = fmt.Sprintf("Selected v%s for %s", ev.Version, ev.Device)
 		}
 
 	case core.EventDownloadStart:
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
+		if ds != nil {
 			ds.arch = ev.Arch
 			ds.phase = "downloading"
 			ds.progress = 0
 			m.downloading++
-			ps.subStatus = fmt.Sprintf("Downloading %s...", ev.Device)
-			ps.status = advanceStatus(ps.status, "Downloading...")
-			ps.activeDeviceKey = key
 		}
 
 	case core.EventDownloadProgress:
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
+		if ds != nil {
 			ds.progress = ev.Progress
 		}
 
 	case core.EventDownloadDone:
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
+		if ds != nil {
 			ds.arch = ev.Arch
 			ds.progress = 1.0
 			ds.phase = "downloaded"
 			m.downloading--
-			ps.status = advanceStatus(ps.status, fmt.Sprintf("Downloaded %s", ev.Device))
-			if ps.activeDeviceKey == key {
-				ps.activeDeviceKey = ""
-			}
 		}
 
 	case core.EventExtractStart:
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
+		if ds != nil {
 			ds.arch = ev.Arch
 			ds.phase = "extracting"
 			m.extracting++
-			ps.subStatus = fmt.Sprintf("Extracting %s...", ev.Device)
-			ps.status = advanceStatus(ps.status, "Extracting...")
-			ps.activeDeviceKey = key
 		}
 
 	case core.EventExtractDone:
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
+		if ds != nil {
 			ds.arch = ev.Arch
 			ds.phase = "complete"
 			m.extracting--
-			ps.status = advanceStatus(ps.status, fmt.Sprintf("Extracted %s", ev.Device))
-			if ps.activeDeviceKey == key {
-				ps.activeDeviceKey = ""
-			}
 		}
 
 	case core.EventDeviceComplete:
-		key := ev.Device
-		if ds, ok := ps.devices[key]; ok {
+		if ds != nil {
 			ds.done = true
 			ds.phase = "complete"
+			ds.version = ev.Version
+			ds.arch = ev.Arch
 			m.doneDevices++
 			ps.done++
 		}
 
 	case core.EventProviderDone:
-		ps.status = "Complete"
-		ps.subStatus = ""
-		ps.activeDeviceKey = ""
+		// Nothing to update at provider level
 
 	case core.EventProviderFailed:
+		if ds != nil {
+			ds.failed = true
+			ds.phase = "failed"
+		}
 		ps.failed++
-		ps.status = "Failed"
-		ps.subStatus = ev.Message
-		ps.activeDeviceKey = ""
 	}
+}
+
+// initializeProviders pre-populates all providers and devices from config.
+func (m *Model) initializeProviders(providers []core.ProviderInfo) {
+	m.providers = make([]*providerState, 0, len(providers))
+	m.totalDevices = 0
+
+	for _, p := range providers {
+		ps := &providerState{
+			name:    p.Name,
+			devices: make([]*deviceState, 0, len(p.Devices)),
+		}
+
+		for _, device := range p.Devices {
+			ds := &deviceState{
+				prefix: device,
+				phase:  "waiting",
+			}
+			ps.devices = append(ps.devices, ds)
+			m.totalDevices++
+		}
+
+		m.providers = append(m.providers, ps)
+	}
+
+	m.initialized = true
+}
+
+// findProvider returns the provider state by name, or nil.
+func (m *Model) findProvider(name string) *providerState {
+	for _, ps := range m.providers {
+		if ps.name == name {
+			return ps
+		}
+	}
+	return nil
+}
+
+// findDevice returns the device state by prefix, or nil.
+func (m *Model) findDevice(ps *providerState, prefix string) *deviceState {
+	for _, ds := range ps.devices {
+		if ds.prefix == prefix {
+			return ds
+		}
+	}
+	return nil
+}
+
+// padRight pads s to width with spaces on the right, truncating if needed.
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}
+
+// padCenter centers s within width, padding with spaces on both sides.
+func padCenter(s string, width int) string {
+	if len(s) >= width {
+		return s[:width]
+	}
+	left := (width - len(s)) / 2
+	right := width - len(s) - left
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+}
+
+// truncateToLines truncates s to at most n lines.
+func truncateToLines(s string, n int) string {
+	cut := 0
+	for i := 0; i < n; i++ {
+		idx := strings.IndexRune(s[cut:], '\n')
+		if idx == -1 {
+			return s
+		}
+		cut += idx + 1
+	}
+	return s[:cut]
 }

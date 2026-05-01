@@ -96,6 +96,15 @@ cmd/driverscrape/main.go          ← CLI entry point
 20. Consider adding a driver package manager
 
 ## Recent Changes
+- **TUI Redesign (2026-05-01)**: Complete redesign of the TUI with Bloomberg Terminal aesthetic
+  - All devices pre-populated at startup via `EventInit` carrying `[]ProviderInfo`
+  - Fixed table layout: DEVICE | ARCH | VERSION | STATUS | PROGRESS columns
+  - Bloomberg Terminal palette: dark navy bg (#0A0A1E), amber (#FFB815), cyan (#00BFFF), green (#00E676), red (#FF1744)
+  - Pre-computed styled characters for progress bars (efficient rendering)
+  - Stable device positions - no more elements moving around during execution
+  - Provider headers show DONE count + active phase counts
+  - Overall progress bar at bottom
+  - Timestamp in header
 - Fixed TUI progress event integration by adding `ProgressEvent` type alias
 - Fixed spinner tick() return type to match tea.Cmd signature
 - Fixed providerState struct to include message field
