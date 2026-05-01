@@ -8,17 +8,17 @@ providers:
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "I226-V"
-        hwid: "VEN_8086&DEV_121F"
+        hwid: "VEN_8086&DEV_125C"
         family_name: "I226"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "I219-V"
-        hwid: "VEN_8086&DEV_15FB"
+        hwid: "VEN_8086&DEV_15B8"
         family_name: "I219"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "I210"
-        hwid: "VEN_8086&DEV_153A"
+        hwid: "VEN_8086&DEV_1533"
         family_name: "I210"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
@@ -28,20 +28,22 @@ providers:
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "X550"
-        hwid: "VEN_8086&DEV_15C1"
+        hwid: "VEN_8086&DEV_1563"
         family_name: "X550"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "X710"
-        hwid: "VEN_8086&DEV_158B"
+        hwid: "VEN_8086&DEV_1572"
         family_name: "X710"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "E810"
-        hwid: "VEN_8086&DEV_15C3"
+        hwid: "VEN_8086&DEV_1592"
         family_name: "E810"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
+        queries:
+          - "VEN_8086&DEV_1592"
       - prefix: "IAVF"
         hwid: "VEN_8086&DEV_1889"
         family_name: "IAVF"
@@ -65,30 +67,41 @@ providers:
   - name: "Marvell Ethernet"
     key: "marvell"
     devices:
+      # PCIe Family (VEN_1D6A = Aquantia)
       - prefix: "AQC107"
-        hwid: "VEN_14A5&DEV_AQC107"
+        hwid: "VEN_1D6A&DEV_D107"
         family_name: "AQC107"
-        queries:
-          - "AQC-107T"
-          - "AQC107"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
       - prefix: "AQC113"
-        hwid: "VEN_14A5&DEV_AQC113"
+        hwid: "VEN_1D6A&DEV_04C0"
         family_name: "AQC113"
-        queries:
-          - "AQC-113"
-          - "AQC113"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
+        queries:
+          - "VEN_1D6A&DEV_04C0"
+      # USB Family (uses VID_1D6A&PID_ format)
       - prefix: "AQC111U"
-        hwid: "VEN_14A5&DEV_AQC111"
+        hwid: "VID_1D6A&PID_D111"
         family_name: "AQC111U"
-        queries:
-          - "AQC-111U"
-          - "AQC111U"
         selection_strategy: "newest_by_date"
         exclude_ndis: false
+        queries:
+          - "VID_1D6A&PID_D111"
+      - prefix: "AQC111U-TRENDnet"
+        hwid: "VID_20F4&PID_E05A"
+        family_name: "AQC111U"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+        queries:
+          - "VID_20F4&PID_E05A"
+      - prefix: "AQC111U-ASIX"
+        hwid: "VID_0B95&PID_2790"
+        family_name: "AQC111U"
+        selection_strategy: "newest_by_date"
+        exclude_ndis: false
+        queries:
+          - "VID_0B95&PID_2790"
 
   - name: "Realtek Ethernet"
     key: "realtek"
