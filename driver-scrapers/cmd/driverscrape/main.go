@@ -219,6 +219,26 @@ func main() {
 	fmt.Printf("Total: %d success, %d failed, %d skipped\n",
 		totalSuccess, totalFailed, totalSkipped)
 
+	// Print detailed reasons for skipped/failed devices
+	hasIssues := false
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		for _, d := range r.DeviceResults {
+			if d.Status == "skipped" || d.Status == "failed" {
+				if !hasIssues {
+					fmt.Println()
+					fmt.Println("========================================")
+					fmt.Println("SKIPPED / FAILED DEVICES")
+					fmt.Println("========================================")
+					hasIssues = true
+				}
+				fmt.Printf("  [%s] %s: %s\n", strings.ToUpper(d.Status), d.Prefix, d.Reason)
+			}
+		}
+	}
+
 	if totalFailed > 0 {
 		os.Exit(1)
 	}

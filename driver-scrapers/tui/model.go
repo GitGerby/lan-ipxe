@@ -305,6 +305,9 @@ func (m *Model) renderStatus(ds *deviceState) string {
 	case ds.done:
 		symbol = doneStyle.Render(charDone)
 		phaseText = ""
+	case ds.phase == "skipped":
+		symbol = failStyle.Render(charFail)
+		phaseText = statusTextStyle.Render("skipped")
 	case ds.failed:
 		symbol = failStyle.Render(charFail)
 		phaseText = ""
@@ -338,7 +341,7 @@ func (m *Model) renderStatus(ds *deviceState) string {
 		statusStr = symbol
 	}
 
-	return padRight(statusStr, colStatus)
+	return lipgloss.NewStyle().Width(colStatus).Render(statusStr)
 }
 
 func (m *Model) renderProgressBar(ds *deviceState) string {
@@ -408,6 +411,13 @@ func (m *Model) handleProgress(ev core.ProgressEvent) {
 				ds.failed = true
 				ps.failed++
 			}
+		}
+
+	case core.EventDeviceSkipped:
+		if ds != nil {
+			ds.phase = "skipped"
+			ds.failed = true
+			ps.failed++
 		}
 
 	case core.EventPackageSelected:

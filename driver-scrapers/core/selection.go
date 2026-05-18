@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -71,15 +70,6 @@ func (o *Orchestrator) selectSingle(prefix string, results []*SearchResult, stra
 		Version:      best.Detail.Version,
 		UpdateID:     best.Detail.UpdateID,
 	}
-
-	o.progress.Send(ProgressEvent{
-		Type:     EventPackageSelected,
-		Provider: o.provider.Name(),
-		Device:   pkg.DevicePrefix,
-		Arch:     pkg.Arch,
-		Version:  pkg.Version,
-		Status:   fmt.Sprintf("Selected v%s", pkg.Version),
-	})
 
 	return pkg
 }

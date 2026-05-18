@@ -18,6 +18,7 @@ const (
 	EventProviderStart EventType = iota
 	EventDeviceSearchStart
 	EventDeviceSearchDone
+	EventDeviceSkipped
 	EventPackageSelected
 	EventDownloadStart
 	EventDownloadProgress
@@ -39,6 +40,8 @@ func (e EventType) String() string {
 		return "DEVICE_SEARCH_START"
 	case EventDeviceSearchDone:
 		return "DEVICE_SEARCH_DONE"
+	case EventDeviceSkipped:
+		return "DEVICE_SKIPPED"
 	case EventPackageSelected:
 		return "PACKAGE_SELECTED"
 	case EventDownloadStart:
@@ -159,13 +162,23 @@ type DriverProvider interface {
 	Devices() []DeviceTarget
 }
 
+// DeviceOutcome tracks the result for a single device within a provider.
+type DeviceOutcome struct {
+	Prefix  string // device prefix
+	Status  string // "success", "failed", "skipped"
+	Reason  string // detailed reason for failure/skip, empty for success
+	Arch    string // resolved architecture
+	Version string // resolved version
+}
+
 // ProviderResult holds the results for a single provider run.
 type ProviderResult struct {
-	ProviderName string
-	Success      int
-	Failed       int
-	Skipped      int
-	Errors       []error
+	ProviderName  string
+	Success       int
+	Failed        int
+	Skipped       int
+	Errors        []error
+	DeviceResults []DeviceOutcome // per-device outcomes for detailed summary
 }
 
 // Orchestrator manages the driver scraping workflow.
@@ -267,10 +280,14 @@ func (o *Orchestrator) Run() *ProviderResult {
 
 	var successCount, failedCount, skippedCount int32
 
+	// Collect per-device outcomes for detailed summary
+	var outcomes sync.Map // map[prefix]DeviceOutcome
+
 	// Channel to collect selected packages (after search + select per device)
 	type deviceResult struct {
 		pkg     *DriverPackage
 		skipped bool
+		reason  string
 	}
 
 	packageChan := make(chan deviceResult, len(devices))
@@ -295,7 +312,20 @@ func (o *Orchestrator) Run() *ProviderResult {
 			}
 
 			if pkg == nil {
-				packageChan <- deviceResult{skipped: true}
+				reason := "No suitable package found"
+				o.progress.Send(ProgressEvent{
+					Type:     EventDeviceSkipped,
+					Provider: o.provider.Name(),
+					Device:   dev.Prefix,
+					Status:   "Skipped",
+					Message:  reason,
+				})
+				outcomes.Store(dev.Prefix, DeviceOutcome{
+					Prefix: dev.Prefix,
+					Status: "skipped",
+					Reason: reason,
+				})
+				packageChan <- deviceResult{skipped: true, reason: reason}
 				return
 			}
 
@@ -328,6 +358,7 @@ func (o *Orchestrator) Run() *ProviderResult {
 		for res := range packageChan {
 			if res.skipped {
 				atomic.AddInt32(&skippedCount, 1)
+				// Outcome already recorded by producer
 				continue
 			}
 
@@ -344,6 +375,13 @@ func (o *Orchestrator) Run() *ProviderResult {
 				if !o.cfg.NoDownload {
 					if err := o.downloadPackage(pkg); err != nil {
 						atomic.AddInt32(&failedCount, 1)
+						outcomes.Store(pkg.DevicePrefix, DeviceOutcome{
+							Prefix:  pkg.DevicePrefix,
+							Status:  "failed",
+							Reason:  "Download failed: " + err.Error(),
+							Arch:    pkg.Arch,
+							Version: pkg.Version,
+						})
 						o.progress.Send(ProgressEvent{
 							Type:     EventProviderFailed,
 							Provider: o.provider.Name(),
@@ -360,6 +398,13 @@ func (o *Orchestrator) Run() *ProviderResult {
 				if !o.cfg.NoExtract {
 					if err := o.extractPackage(pkg); err != nil {
 						atomic.AddInt32(&failedCount, 1)
+						outcomes.Store(pkg.DevicePrefix, DeviceOutcome{
+							Prefix:  pkg.DevicePrefix,
+							Status:  "failed",
+							Reason:  "Extract failed: " + err.Error(),
+							Arch:    pkg.Arch,
+							Version: pkg.Version,
+						})
 						o.progress.Send(ProgressEvent{
 							Type:     EventProviderFailed,
 							Provider: o.provider.Name(),
@@ -373,6 +418,12 @@ func (o *Orchestrator) Run() *ProviderResult {
 				}
 
 				atomic.AddInt32(&successCount, 1)
+				outcomes.Store(pkg.DevicePrefix, DeviceOutcome{
+					Prefix:  pkg.DevicePrefix,
+					Status:  "success",
+					Arch:    pkg.Arch,
+					Version: pkg.Version,
+				})
 				// Send per-device completion event (not provider-level)
 				o.progress.Send(ProgressEvent{
 					Type:     EventDeviceComplete,
@@ -397,6 +448,13 @@ func (o *Orchestrator) Run() *ProviderResult {
 	result.Success = int(atomic.LoadInt32(&successCount))
 	result.Failed = int(atomic.LoadInt32(&failedCount))
 	result.Skipped = int(atomic.LoadInt32(&skippedCount))
+
+	// Collect per-device outcomes into result
+	result.DeviceResults = make([]DeviceOutcome, 0)
+	outcomes.Range(func(key, value any) bool {
+		result.DeviceResults = append(result.DeviceResults, value.(DeviceOutcome))
+		return true
+	})
 
 	o.progress.Send(ProgressEvent{
 		Type:     EventProviderDone,

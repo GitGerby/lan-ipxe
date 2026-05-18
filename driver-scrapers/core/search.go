@@ -132,17 +132,12 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 			continue
 		}
 
-		if cfg.Progress != nil {
-			cfg.Progress.Send(ProgressEvent{
-				Type:     EventDeviceSearchDone,
-				Provider: cfg.ProviderName,
-				Device:   dev.Prefix,
-				Status:   fmt.Sprintf("Found %d result(s)", len(updateIDs)),
-				Progress: 1.0,
-			})
-		}
-
-		// Fetch details for each update ID in parallel (throttled by errgroup)
+		// Fetch details for each update ID in parallel (throttled by errgroup).
+		// Note: we do NOT send EventDeviceSearchDone here - it is sent after all
+		// details are fetched (below). Sending it prematurely would cause the TUI
+		// to show "found" while detail fetching is still in progress, creating the
+		// illusion of head-of-line blocking where devices appear stuck in "found"
+		// state until all other devices also reach "found".
 		var detailResults []*SearchResult
 		var detailMu sync.Mutex
 		errFile, _ := openSearchErrorLog(dev.Prefix)
@@ -199,6 +194,20 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 
 		g.Wait() // always nil since all Go() calls return nil
 		allResults = append(allResults, detailResults...)
+
+		// Send search done event AFTER detail fetching completes.
+		// This ensures the TUI "found" phase only appears when the device
+		// can immediately progress to "selected", eliminating the appearance
+		// of head-of-line blocking.
+		if cfg.Progress != nil && len(detailResults) > 0 {
+			cfg.Progress.Send(ProgressEvent{
+				Type:     EventDeviceSearchDone,
+				Provider: cfg.ProviderName,
+				Device:   dev.Prefix,
+				Status:   fmt.Sprintf("Found %d result(s)", len(detailResults)),
+				Progress: 1.0,
+			})
+		}
 	}
 
 	return allResults
