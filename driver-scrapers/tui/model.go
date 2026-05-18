@@ -316,6 +316,12 @@ func (m *Model) renderStatus(ds *deviceState) string {
 	case ds.phase == "selected":
 		symbol = readyStyle.Render(charActive)
 		phaseText = ""
+	case ds.phase == "found":
+		symbol = readyStyle.Render(charActive)
+		phaseText = statusTextStyle.Render("found")
+	case ds.phase == "downloaded":
+		symbol = readyStyle.Render(charActive)
+		phaseText = statusTextStyle.Render("downloaded")
 	case ds.phase == "downloading":
 		symbol = activeStyle.Render(m.spinner.View())
 		phaseText = statusTextStyle.Render("downloading")
