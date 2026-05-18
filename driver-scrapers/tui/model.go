@@ -36,8 +36,6 @@ type Model struct {
 	// Spinner
 	spinner  spinner.Model
 	quitting bool
-	// Whether EventInit has been received
-	initialized bool
 }
 
 type providerState struct {
@@ -377,12 +375,6 @@ func (m *Model) renderOverall(width int) string {
 
 // handleProgress processes a progress event.
 func (m *Model) handleProgress(ev core.ProgressEvent) {
-	// Handle initialization event
-	if ev.Type == core.EventInit {
-		m.initializeProviders(ev.Providers)
-		return
-	}
-
 	// Find provider
 	ps := m.findProvider(ev.Provider)
 	if ps == nil {
@@ -504,8 +496,6 @@ func (m *Model) initializeProviders(providers []core.ProviderInfo) {
 
 		m.providers = append(m.providers, ps)
 	}
-
-	m.initialized = true
 }
 
 // findProvider returns the provider state by name, or nil.

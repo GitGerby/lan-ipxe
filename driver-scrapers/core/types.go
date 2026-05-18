@@ -15,8 +15,7 @@ import (
 type EventType int
 
 const (
-	EventInit EventType = iota // Sent once at startup with full provider/device tree
-	EventProviderStart
+	EventProviderStart EventType = iota
 	EventDeviceSearchStart
 	EventDeviceSearchDone
 	EventPackageSelected
@@ -34,8 +33,6 @@ const (
 // String returns a human-readable string for the event type.
 func (e EventType) String() string {
 	switch e {
-	case EventInit:
-		return "INIT"
 	case EventProviderStart:
 		return "PROVIDER_START"
 	case EventDeviceSearchStart:
@@ -75,17 +72,15 @@ type ProviderInfo struct {
 
 // ProgressEvent is sent via the progress channel to report status updates.
 type ProgressEvent struct {
-	// Used for EventInit to carry the full provider/device tree
-	Providers []ProviderInfo
-	Type      EventType
-	Provider  string  // provider name (e.g., "Intel Ethernet")
-	Device    string  // device prefix or model name
-	Arch      string  // "AMD64" or "ARM64"
-	Version   string  // selected package version
-	Progress  float64 // 0.0 - 1.0
-	Status    string  // human-readable status
-	Message   string  // additional details (filename, error, etc.)
-	Err       error   // non-nil if EventProviderFailed
+	Type     EventType
+	Provider string  // provider name (e.g., "Intel Ethernet")
+	Device   string  // device prefix or model name
+	Arch     string  // "AMD64" or "ARM64"
+	Version  string  // selected package version
+	Progress float64 // 0.0 - 1.0
+	Status   string  // human-readable status
+	Message  string  // additional details (filename, error, etc.)
+	Err      error   // non-nil if EventProviderFailed
 }
 
 // ProgressChan is a channel for ProgressEvent values.
