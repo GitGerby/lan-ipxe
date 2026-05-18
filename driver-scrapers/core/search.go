@@ -41,8 +41,6 @@ type SearchConfig struct {
 	AcceptedArchs []string
 	// DetailThrottle limits concurrent detail page fetches
 	DetailThrottle int
-	// ExcludeNDIS if true, excludes packages with "NDIS" in the title
-	ExcludeNDIS bool
 	// Progress channel for reporting search events
 	Progress ProgressChan
 }
@@ -52,7 +50,6 @@ func DefaultSearchConfig() *SearchConfig {
 	return &SearchConfig{
 		DetailThrottle: 8,
 		AcceptedArchs:  []string{"AMD64"},
-		ExcludeNDIS:    false,
 	}
 }
 
@@ -180,8 +177,8 @@ func SearchDeviceWithContext(ctx context.Context, client *CatalogClient, dev Sea
 					return nil // non-fatal: wrong architecture
 				}
 
-				// Check NDIS exclusion
-				if cfg.ExcludeNDIS && strings.Contains(strings.ToLower(detail.Title), "ndis") {
+				// Check NDIS exclusion (per-device setting from dev, not cfg)
+				if dev.ExcludeNDIS && strings.Contains(strings.ToLower(detail.Title), "ndis") {
 					return nil // non-fatal: NDIS excluded
 				}
 
