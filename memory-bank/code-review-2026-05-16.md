@@ -130,13 +130,13 @@ The `detectArch` function checks for "ARM64" first, then "AMD64"/"x64", defaulti
 
 **Fix:** Parse architecture from more specific HTML elements or URLs.
 
-### 4.3 extractCab doesn't verify extraction success (extractor.go)
+### 4.3 extractCab lists files but doesn't verify meaningful content (extractor.go)
 
-**Severity: MEDIUM** - Silent data loss
+**Severity: MEDIUM** - Silent data loss (partially mitigated)
 
-The `extractPackage` function runs the extraction command and checks the exit code, but doesn't verify that files were actually extracted. An empty CAB file or a CAB with only non-driver files would pass validation but produce no useful output.
+The `extractCAB` function at line 77 does call `listFiles(extractDir)` after extraction, and the file count is reported in `EventExtractDone`. However, it doesn't check if the file list is empty (would fail on empty dir since Walk returns no files but no error), and it doesn't verify that driver files (.inf/.sys/.cat) exist. A CAB containing only readme files or metadata would pass validation.
 
-**Fix:** Check that the extraction directory contains files after extraction, and optionally verify .inf/.sys files exist.
+**Fix:** Add check `if len(files) == 0 { return nil, fmt.Errorf("no files extracted") }` and optionally verify .inf file exists.
 
 ### 4.4 downloadPackage accesses unexported fields (downloader.go line 47, 50)
 

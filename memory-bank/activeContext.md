@@ -73,27 +73,31 @@ cmd/driverscrape/main.go          ← CLI entry point
 4. **Selection Strategies** - Pluggable strategies for package selection
 5. **Platform Abstraction** - Extraction uses platform-appropriate tools
 
-## Next Steps
-1. Build and test the complete project
-2. Add unit tests for core logic
-3. Add more device targets as needed
-4. Consider adding CSV/JSON output for results
-5. Add retry logic for failed downloads
-6. Implement driver package signing verification
-7. Add support for .inf-based driver extraction
-8. Consider adding a `--dry-run` mode for testing
-9. Add support for custom catalog URLs
-10. Implement caching for catalog search results
-11. Add support for driver package repackaging
-12. Consider adding a GUI mode using a different TUI library
-13. Add support for driver package validation
-14. Implement driver package compression
-15. Add support for driver package signing
-16. Consider adding a web-based dashboard
-17. Add support for driver package deduplication
-18. Implement driver package verification
-19. Add support for driver package documentation
-20. Consider adding a driver package manager
+## Next Steps - Updated after Code Review (2026-05-16)
+
+### Critical (must fix before next use)
+1. Fix ExcludeNDIS bug - per-device setting is ignored, causes wrong driver selection for Qualcomm/MediaTek
+2. Fix TUI phase rendering - "found" and "downloaded" phases show "·" instead of proper status
+3. Fix TUI counter underflow - downloading/extracting counters can go negative
+
+### High Priority
+4. Pre-compile parseVersion regex as package-level var
+5. Fix CatalogClient timeout to respect OrchestratorConfig.Timeout
+6. Add extraction verification (check files exist after extract)
+
+### Medium Priority
+7. Convert download phase to streaming pipeline (eliminate HOL blocking)
+8. Key TUI device state by prefix+arch composite key
+9. Remove EventInit dead code
+10. Add retry logic for failed downloads
+
+### Lower Priority
+11. Add caching for catalog search results
+12. Add dry-run mode
+13. Add unit tests for core logic
+14. Consider CSV/JSON output for results
+
+See `memory-bank/code-review-2026-05-16.md` for full detailed report.
 
 ## Recent Changes
 - **TUI Redesign (2026-05-01)**: Complete redesign of the TUI with Bloomberg Terminal aesthetic
