@@ -148,7 +148,7 @@ func main() {
 
 		// Pass provider info directly to model so devices are rendered before p.Run()
 		model := tui.NewModel(providerInfos)
-		p := tea.NewProgram(model)
+		p := tea.NewProgram(model, tea.WithAltScreen())
 
 		// Start providers in a background goroutine
 		go func() {
