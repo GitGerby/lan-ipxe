@@ -1,6 +1,6 @@
 # macOS workstation setup
 
-`setup-macos-workstation.sh` implements the approved [plan](setup-macos-workstation-plan.md) for **native Apple Silicon on macOS 26**, using Apple Bash 3.2 for bootstrap and a Python 3.9+ standard-library controller for structured state. Intel, translated shells and dual Homebrew prefixes are rejected. Other macOS releases need validation before enabling them.
+`setup-macos-workstation.sh` implements the approved [plan](setup-macos-workstation-plan.md) for **native Apple Silicon on macOS 26 and macOS 27**, using Apple Bash 3.2 for bootstrap and a Python 3.9+ standard-library controller for structured state. Intel, translated shells and dual Homebrew prefixes are rejected. Other macOS releases need validation before enabling them.
 
 ```bash
 ./setup-macos-workstation.sh --dry-run
@@ -76,7 +76,7 @@ python3 -B tests/test-macos-workstation.py
 shellcheck -S warning setup-macos-workstation.sh files/macos/environment.sh files/macos/bashrc tests/test-macos-shell.sh
 ```
 
-Tests use temporary homes, fake package/system commands and configuration fixtures. On 8 September 2026, the full profile was applied locally on Apple Silicon macOS 26.6.2 and reached the final game-directory report. A second full run with `--no-upgrade` verified the Zed workaround, corrected MediaInfo/Outline Manager identities, Homebrew JDK selection, shell/editor configuration and desktop reconciliation. Wireshark and Google Drive still required administrator authentication, and Android SDK/build-tools/NDK installation required personal license review; those steps were deferred during the agent-driven test.
+Tests use temporary homes, fake package/system commands and configuration fixtures. The setup is validated on both Apple Silicon macOS 26.6.2 and macOS 27.0. On 8 September 2026, the full profile was applied locally on Apple Silicon macOS 26.6.2 and reached the final game-directory report. A second full run with `--no-upgrade` verified the Zed workaround, corrected MediaInfo/Outline Manager identities, Homebrew JDK selection, shell/editor configuration and desktop reconciliation. Wireshark and Google Drive still required administrator authentication, and Android SDK/build-tools/NDK installation required personal license review; those steps were deferred during the agent-driven test.
 
 The standalone Zed download/install path was also exercised in a temporary application directory, including ARM64, signature, signing-team and Gatekeeper checks. The captured-command timeout was observed terminating the stalled Studio Java process and continuing through all remaining phases. Native Bash/Zsh behavior tests, ShellCheck and 22 controller/bootstrap tests passed. A disposable clean macOS installation, optional Sharing/TCC and other opt-in system phases remain untested.
 

@@ -169,7 +169,7 @@ unmaintained upstream. Run from any directory: the Linux scripts resolve their c
 payloads (`files/`) relative to their own location.
 
 macOS now has `setup-macos-workstation.sh`, targeting native Apple Silicon on
-macOS 26. Its default **core** profile includes Linux CLI parity, **wget and Go**,
+macOS 26 and macOS 27. Its default **core** profile includes Linux CLI parity, **wget and Go**,
 Python/Rust, everyday apps and the portable Bash configuration. **Full** adds
 large toolchains, Java/Maven/Gradle, stable Android SDK/build-tools/NDK, optional
 apps and games. All Store apps and supplemental game-data downloads are excluded.

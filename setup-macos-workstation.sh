@@ -58,9 +58,13 @@ main() {
     done
     [ "$(uname -s)" = Darwin ] || { echo 'Requires macOS' >&2; return 1; }
     [ "$(uname -m)" = arm64 ] || { echo 'Requires native Apple Silicon shell (no Rosetta)' >&2; return 1; }
-    [ "$(sw_vers -productVersion | cut -d . -f 1)" = 26 ] || {
-        echo 'Initial support target is macOS 26; other releases are unvalidated.' >&2; return 1;
-    }
+    case "$(sw_vers -productVersion | cut -d . -f 1)" in
+        26|27) ;;
+        *)
+            echo 'Supported targets are macOS 26 and 27; other releases are unvalidated.' >&2
+            return 1
+            ;;
+    esac
     [ "$(id -u)" -ne 0 ] || { echo 'Run as your normal user, without sudo.' >&2; return 1; }
     [ -d "$HOME" ] && [ -O "$HOME" ] || { echo 'HOME must be owned by this user.' >&2; return 1; }
     [ ! -x /usr/local/bin/brew ] || { echo 'Intel Homebrew detected; resolve the dual-prefix installation first.' >&2; return 1; }

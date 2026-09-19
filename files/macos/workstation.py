@@ -985,7 +985,7 @@ class Workstation:
         disabled = self.command(['/bin/launchctl', 'print-disabled', 'system'], check=False).stdout
         for service, group in [('com.openssh.sshd', 'com.apple.access_ssh'), ('com.apple.screensharing', 'com.apple.access_screensharing')]:
             membership = self.command(['/usr/sbin/dseditgroup', '-o', 'checkmember', '-m', user, group], check=False)
-            enabled = re.search('"' + re.escape(service) + r'"\s*=>\s*false', disabled) is not None
+            enabled = re.search(r'"' + re.escape(service) + r'"\s*=>\s*(?:false|enabled)', disabled) is not None
             if self.preview:
                 self.emit('CURRENT' if enabled and membership.returncode == 0 else 'DRIFT', service, 'restricted access group membership and service enablement'); continue
             if membership.returncode:
@@ -1004,7 +1004,7 @@ class Workstation:
                     if not registered:
                         self.command(['/usr/bin/sudo', '/bin/launchctl', 'bootstrap', 'system', '/System/Library/LaunchDaemons/com.apple.screensharing.plist'], mutate=True, capture=False)
             verified = self.command(['/bin/launchctl', 'print-disabled', 'system']).stdout
-            if not re.search('"' + re.escape(service) + r'"\s*=>\s*false', verified):
+            if not re.search(r'"' + re.escape(service) + r'"\s*=>\s*(?:false|enabled)', verified):
                 raise Deferred('Confirm Sharing access in System Settings: ' + service)
             self.emit('CURRENT', service, 'enabled; existing access-group members retained')
         self.emit('NOTE', 'SMB', 'No shares or guest access configured; paths/access policy require a separate choice')
@@ -1133,7 +1133,7 @@ def arguments(argv=None):
 
 def main(argv=None):
     args = arguments(argv)
-    if sys.platform != 'darwin' or os.getuid() == 0 or platform.machine() != 'arm64' or platform.mac_ver()[0].split('.')[0] != '26':
+    if sys.platform != 'darwin' or os.getuid() == 0 or platform.machine() != 'arm64' or platform.mac_ver()[0].split('.')[0] not in ('26', '27'):
         print('Run setup-macos-workstation.sh as a normal user on native macOS.', file=sys.stderr)
         return 1
     if Path('/usr/local/bin/brew').exists():

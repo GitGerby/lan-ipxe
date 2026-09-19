@@ -283,6 +283,69 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue(all(java == str(jdk) for _, java in calls))
         self.assertTrue(all('--sdk_root=' + str(root) in argv for argv, _ in calls))
 
+    def test_sharing_service_detection_formats(self):
+        formats = {
+            'macos_26': '"com.openssh.sshd" => false\n"com.apple.screensharing" => false',
+            'macos_27': '"com.openssh.sshd" => enabled\n"com.apple.screensharing" => enabled',
+        }
+        for name, disabled_output in formats.items():
+            # Preview mode recognizes service as enabled without DRIFT
+            self.obj.preview = True
+            self.obj.events = []
+            def command_preview(argv, **kwargs):
+                cmd = ' '.join(str(a) for a in argv)
+                if 'id -un' in cmd:
+                    return subprocess.CompletedProcess(argv, 0, 'tester\n', '')
+                if 'launchctl print-disabled system' in cmd:
+                    return subprocess.CompletedProcess(argv, 0, disabled_output, '')
+                if 'dseditgroup -o checkmember' in cmd:
+                    return subprocess.CompletedProcess(argv, 0, 'yes\n', '')
+                raise AssertionError(f'Unexpected command in preview ({name}): {cmd}')
+            self.obj.command = command_preview
+            self.obj.sharing()
+            preview_statuses = {e['item']: e['status'] for e in self.obj.events}
+            self.assertEqual(preview_statuses.get('com.openssh.sshd'), 'CURRENT')
+            self.assertEqual(preview_statuses.get('com.apple.screensharing'), 'CURRENT')
+            self.assertFalse(any(e['status'] == 'DRIFT' for e in self.obj.events), f'False DRIFT emitted in {name}')
+
+            # Apply mode recognizes service as enabled without mutating or raising Deferred
+            self.obj.preview = False
+            self.obj.events = []
+            def command_apply(argv, **kwargs):
+                self.assertFalse(kwargs.get('mutate', False), f'Mutating command called when service already enabled ({name}): {argv}')
+                cmd = ' '.join(str(a) for a in argv)
+                if 'id -un' in cmd:
+                    return subprocess.CompletedProcess(argv, 0, 'tester\n', '')
+                if 'launchctl print-disabled system' in cmd:
+                    return subprocess.CompletedProcess(argv, 0, disabled_output, '')
+                if 'dseditgroup -o checkmember' in cmd:
+                    return subprocess.CompletedProcess(argv, 0, 'yes\n', '')
+                raise AssertionError(f'Unexpected command in apply ({name}): {cmd}')
+            self.obj.command = command_apply
+            self.obj.sharing()
+            apply_statuses = {e['item']: e['status'] for e in self.obj.events}
+            self.assertEqual(apply_statuses.get('com.openssh.sshd'), 'CURRENT')
+            self.assertEqual(apply_statuses.get('com.apple.screensharing'), 'CURRENT')
+            self.assertFalse(any(e['status'] == 'DRIFT' for e in self.obj.events), f'False DRIFT emitted in {name}')
+
+        # Disabled service format emits DRIFT in preview
+        self.obj.preview = True
+        self.obj.events = []
+        def command_disabled(argv, **kwargs):
+            cmd = ' '.join(str(a) for a in argv)
+            if 'id -un' in cmd:
+                return subprocess.CompletedProcess(argv, 0, 'tester\n', '')
+            if 'launchctl print-disabled system' in cmd:
+                return subprocess.CompletedProcess(argv, 0, '"com.openssh.sshd" => true\n"com.apple.screensharing" => true', '')
+            if 'dseditgroup -o checkmember' in cmd:
+                return subprocess.CompletedProcess(argv, 0, 'yes\n', '')
+            raise AssertionError(f'Unexpected command in preview: {cmd}')
+        self.obj.command = command_disabled
+        self.obj.sharing()
+        disabled_statuses = {e['item']: e['status'] for e in self.obj.events}
+        self.assertEqual(disabled_statuses.get('com.openssh.sshd'), 'DRIFT')
+        self.assertEqual(disabled_statuses.get('com.apple.screensharing'), 'DRIFT')
+
 
 class BootstrapTests(unittest.TestCase):
     def test_missing_brew_clt_preview_and_python_discovery(self):
@@ -312,6 +375,75 @@ class BootstrapTests(unittest.TestCase):
         result = subprocess.run(['/bin/bash', '-c', '. "$1"', 'test', str(ROOT / 'setup-macos-workstation.sh')], capture_output=True)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, b'')
+
+    def test_setup_script_macos_version_checks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fake_python = Path(temporary) / 'fake-python'
+            fake_python.write_text('#!/bin/sh\necho "python-ran: $@"\n')
+            fake_python.chmod(0o755)
+
+            script = (
+                'source "$1"; '
+                'target_ver="$2"; target_python="$3"; '
+                'uname() { case "$1" in -s) echo Darwin;; -m) echo arm64;; esac; }; '
+                'sw_vers() { echo "$target_ver"; }; '
+                'find_python() { printf "%s\\n" "$target_python"; }; '
+                'main --dry-run'
+            )
+
+            for version in ('26', '27', '26.0', '27.1.0'):
+                result = subprocess.run(
+                    ['/bin/bash', '-c', script, 'test', str(ROOT / 'setup-macos-workstation.sh'), version, str(fake_python)],
+                    capture_output=True, text=True
+                )
+                self.assertEqual(result.returncode, 0)
+                self.assertIn('python-ran:', result.stdout)
+                self.assertNotIn('Supported targets are macOS 26 and 27; other releases are unvalidated.', result.stderr)
+
+            for version in ('25', '28', '25.0', '28.1.0'):
+                result = subprocess.run(
+                    ['/bin/bash', '-c', script, 'test', str(ROOT / 'setup-macos-workstation.sh'), version, str(fake_python)],
+                    capture_output=True, text=True
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('Supported targets are macOS 26 and 27; other releases are unvalidated.', result.stderr)
+                self.assertNotIn('python-ran:', result.stdout)
+
+            bin_dir = Path(temporary) / 'bin'
+            bin_dir.mkdir()
+            sw_vers = bin_dir / 'sw_vers'
+            for unsupported in ('25', '28'):
+                sw_vers.write_text(f'#!/bin/sh\necho {unsupported}.0\n')
+                sw_vers.chmod(0o755)
+                env = os.environ.copy()
+                env['PATH'] = f'{bin_dir}:{env["PATH"]}'
+                result = subprocess.run(['/bin/bash', str(ROOT / 'setup-macos-workstation.sh')], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn('Supported targets are macOS 26 and 27; other releases are unvalidated.', result.stderr)
+
+    def test_main_platform_version_check(self):
+        with patch.object(sys, 'platform', 'darwin'), \
+                patch('os.getuid', return_value=501), \
+                patch('platform.machine', return_value='arm64'), \
+                patch.object(w, 'Workstation') as mock_ws:
+            mock_ws.return_value.run.return_value = 0
+
+            for version in ('26', '27', '26.0', '27.1.0'):
+                mock_ws.reset_mock()
+                with patch('platform.mac_ver', return_value=(version, ('', '', ''), 'arm64')):
+                    result = w.main([])
+                    self.assertEqual(result, 0)
+                    mock_ws.assert_called_once()
+
+            for version in ('25', '28', '25.0', '28.1.0'):
+                mock_ws.reset_mock()
+                stderr = io.StringIO()
+                with patch('platform.mac_ver', return_value=(version, ('', '', ''), 'arm64')), \
+                        contextlib.redirect_stderr(stderr):
+                    result = w.main([])
+                    self.assertEqual(result, 1)
+                    mock_ws.assert_not_called()
+                    self.assertIn('Run setup-macos-workstation.sh as a normal user on native macOS.', stderr.getvalue())
 
 
 if __name__ == '__main__':
