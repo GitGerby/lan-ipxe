@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -218,6 +219,7 @@ func SearchDevices(ctx context.Context, client *CatalogClient, devices []SearchD
 	results := make(map[string][]*SearchResult)
 	var mu sync.Mutex
 	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(runtime.NumCPU() / 2)
 
 	for _, dev := range devices {
 		dev := dev
